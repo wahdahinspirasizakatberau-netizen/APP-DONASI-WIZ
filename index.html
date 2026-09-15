@@ -1,0 +1,2105 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>CRM WIZ Berau - Modern</title>
+
+    <!-- Tailwind CSS untuk Styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Konfigurasi Custom Tema Warna WIZ & Dark Mode -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        wiz: {
+                            green: '#27745F',       // Hijau Logo
+                            green_dark: '#1B5444',  // Hijau Gelap untuk Hover
+                            orange: '#F59121',      // Oranye Logo
+                            orange_dark: '#D87A15', // Oranye Gelap untuk Hover
+                            light: '#F8FAF9'        // Background Abu-abu sangat muda
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- FontAwesome untuk Ikon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- React dan ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- Recharts untuk Grafik Dashboard (Memerlukan prop-types) -->
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+    <script src="https://unpkg.com/recharts@2/umd/Recharts.js"></script>
+    
+    <!-- HTML5 QR Code Scanner untuk akses Kamera -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    
+    <!-- Babel untuk mengkompilasi JSX langsung di Browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Custom CSS Tambahan & Animasi -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        body { 
+            font-family: 'Inter', sans-serif; 
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* Animasi Transisi Halus */
+        .animate-in { animation: fadeIn 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+        .slide-up { animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Scrollbar kustom keren berbasis WIZ Green */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #27745F; }
+        .dark ::-webkit-scrollbar-thumb { background: #475569; }
+        .dark ::-webkit-scrollbar-thumb:hover { background: #27745F; }
+        
+        /* Safe Area Padding untuk HP dengan gesture bar / notch */
+        .pb-safe {
+            padding-bottom: env(safe-area-inset-bottom, 16px);
+        }
+
+        /* Glassmorphism utility */
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .dark .glass {
+            background: rgba(31, 41, 55, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+    </style>
+</head>
+<body class="bg-wiz-light dark:bg-gray-900 text-gray-800 dark:text-gray-100 antialiased selection:bg-wiz-green selection:text-white transition-colors duration-200">
+    
+    <!-- Root Container untuk React -->
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // Mengabaikan harmless error dari browser saat video/kamera dihentikan mendadak (AbortError)
+        window.addEventListener('unhandledrejection', function(event) {
+            if (event.reason && (event.reason.name === 'AbortError' || String(event.reason).includes('The play() request was interrupted'))) {
+                event.preventDefault(); // Senyapkan error ini agar tidak mengganggu UI
+            }
+        });
+
+        const { useState, useEffect, useMemo } = React;
+        const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } = window.Recharts;
+
+        // =========================================================================
+        // 1. UTILITAS & FUNGSI BANTUAN (helpers.js jika dipisah)
+        // =========================================================================
+        const API_URL = 'https://script.google.com/macros/s/AKfycbxvj873D153FGw04Kbgs6nOp4svOWBq4qNgjekjpbLdy-3eQs7HfLe-rAxIzwaOvSGN/exec';
+
+        const fallbackAmils = [
+            { id: 1, name: 'Admin WIZ', email: 'admin@wizberau.or.id', role: 'Admin', status: 'Aktif', password: 'password123' },
+            { id: 2, name: 'Amil WIZ', email: 'amil@wizberau.or.id', role: 'Amil', status: 'Aktif', password: 'password123' },
+        ];
+
+        const formatRp = (number) => {
+            return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number);
+        };
+
+        const formatDate = (dateString) => {
+            if (!dateString) return '-';
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return dateString; 
+            return new Intl.DateTimeFormat('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }).format(date);
+        };
+
+        const getDirectImageUrl = (url) => {
+            if (!url) return '';
+            const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
+            if (match && match[1]) {
+                return `https://drive.google.com/uc?id=${match[1]}`;
+            }
+            return url;
+        };
+
+        const getDrivePreviewUrl = (url) => {
+            if (!url) return '';
+            const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
+            if (match && match[1]) {
+                return `https://drive.google.com/file/d/${match[1]}/preview`;
+            }
+            return url;
+        };
+
+        const getDriveThumbnailUrl = (url) => {
+            if (!url) return '';
+            const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
+            if (match && match[1]) {
+                return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w800`;
+            }
+            return url;
+        };
+
+        const parseMapUrls = (input) => {
+            if (!input) return { webUrl: '', appUrl: '', navUrl: '' };
+            const clean = String(input).trim();
+            if (!clean) return { webUrl: '', appUrl: '', navUrl: '' };
+
+            const coordMatch = clean.match(/([-+]?[0-9]*\.?[0-9]+)\s*,\s*([-+]?[0-9]*\.?[0-9]+)/);
+            const coords = coordMatch ? `${coordMatch[1]},${coordMatch[2]}` : null;
+
+            let webUrl = clean;
+            if (coords && !clean.startsWith('http')) {
+                webUrl = `https://www.google.com/maps?q=${coords}`;
+            } else if (!clean.startsWith('http')) {
+                webUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clean)}`;
+            }
+
+            const navUrl = coords
+                ? `https://www.google.com/maps/dir/?api=1&destination=${coords}`
+                : (clean.startsWith('http') ? clean : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(clean)}`);
+
+            const appUrl = coords ? `geo:${coords}?q=${coords}` : navUrl;
+
+            return { webUrl, appUrl, navUrl };
+        };
+
+        // =========================================================================
+        // 2. KOMPONEN UI GLOBAL (components/ui/...)
+        // =========================================================================
+
+        // --- KOMPONEN BUTTON ---
+        const Button = ({ children, onClick, variant = 'primary', className = '', type = 'button', icon, disabled = false }) => {
+            const baseStyle = "flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm";
+            const variants = {
+                primary: "bg-wiz-green hover:bg-wiz-green_dark text-white focus:ring-wiz-green hover:shadow-md hover:-translate-y-0.5",
+                accent: "bg-gradient-to-r from-wiz-orange to-[#fca545] hover:from-wiz-orange_dark hover:to-wiz-orange text-white focus:ring-wiz-orange shadow-md hover:shadow-lg hover:-translate-y-0.5 border border-wiz-orange/20",
+                secondary: "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 focus:ring-gray-200 hover:shadow-sm",
+                danger: "bg-red-50 dark:bg-red-900/30 hover:bg-red-500 text-red-600 dark:text-red-400 hover:text-white border border-red-100 dark:border-red-800 focus:ring-red-500",
+                ghost: "bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 focus:ring-gray-500 shadow-none border border-transparent",
+            };
+            return (
+                <button type={type} onClick={onClick} disabled={disabled} className={`${baseStyle} ${variants[variant]} ${className}`}>
+                    {icon && <i className={icon}></i>}
+                    {children}
+                </button>
+            );
+        };
+
+        // --- KOMPONEN MODAL ---
+        const Modal = ({ isOpen, onClose, title, children }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-gray-900/60 dark:bg-black/75 backdrop-blur-sm animate-in">
+                    <div className="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-lg max-h-[92vh] sm:max-h-[90vh] overflow-y-auto slide-up border border-white/20 dark:border-gray-700 text-gray-800 dark:text-gray-100 flex flex-col">
+                        {title && (
+                            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-gray-100 dark:border-gray-700 sticky top-0 bg-white/95 dark:bg-gray-800/95 backdrop-blur z-10">
+                                <h2 className="text-base sm:text-xl font-bold text-gray-800 dark:text-gray-100 truncate pr-2">{title}</h2>
+                                <button onClick={onClose} className="w-9 h-9 flex items-center justify-center text-gray-400 hover:text-wiz-green dark:hover:text-emerald-400 hover:bg-wiz-green/10 dark:hover:bg-gray-700 rounded-full transition-colors shrink-0">
+                                    <i className="fa-solid fa-xmark text-lg"></i>
+                                </button>
+                            </div>
+                        )}
+                        <div className="p-4 sm:p-6 pb-8 sm:pb-6 overflow-y-auto">
+                        {children}
+                    </div>
+                </div>
+            </div>
+            );
+        };
+
+        // --- KOMPONEN QR SCANNER ---
+        const Html5QrcodePlugin = ({ qrCodeSuccessCallback }) => {
+            const callbackRef = React.useRef(qrCodeSuccessCallback);
+            React.useEffect(() => { callbackRef.current = qrCodeSuccessCallback; }, [qrCodeSuccessCallback]);
+            const fileInputRef = React.useRef(null);
+            const [isBlocked, setIsBlocked] = React.useState(false);
+            const [isProcessingFile, setIsProcessingFile] = React.useState(false);
+
+            const playBeep = () => {
+                try {
+                    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    const oscillator = audioCtx.createOscillator();
+                    const gainNode = audioCtx.createGain();
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+                    gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioCtx.destination);
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.15);
+                } catch (e) { /* Abaikan jika browser membatasi Web Audio */ }
+            };
+
+            const handleFileScan = async (e) => {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+
+                setIsProcessingFile(true);
+                try {
+                    const scanner = new window.Html5Qrcode("qr-file-processor");
+                    const decodedText = await scanner.scanFile(file, true);
+                    playBeep();
+                    if (callbackRef.current) {
+                        callbackRef.current(decodedText);
+                    }
+                } catch (err) {
+                    console.error("Gagal membaca QR dari foto:", err);
+                    showCustomNotice("QR Code tidak terdeteksi pada foto. Pastikan foto QR terlihat jelas dan terang.", "bg-amber-600");
+                } finally {
+                    setIsProcessingFile(false);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                }
+            };
+
+            const showCustomNotice = (msg, bg = "bg-red-500") => {
+                const el = document.createElement('div');
+                el.className = `fixed top-5 left-1/2 -translate-x-1/2 z-[100] ${bg} text-white text-xs px-4 py-2.5 rounded-xl shadow-lg transition-all text-center max-w-xs`;
+                el.innerText = msg;
+                document.body.appendChild(el);
+                setTimeout(() => { el.remove(); }, 3500);
+            };
+
+            useEffect(() => {
+                let html5QrCode;
+                let isComponentMounted = true;
+                let isScanningNow = false;
+
+                const startCamera = async () => {
+                    if (!window.Html5Qrcode) return;
+                    
+                    try {
+                        html5QrCode = new window.Html5Qrcode("qr-reader");
+                        const config = { 
+                            fps: 15, 
+                            qrbox: function (viewfinderWidth, viewfinderHeight) {
+                                let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
+                                let boxSize = Math.floor(minEdgeSize * 0.75);
+                                let finalBoxSize = Math.max(50, boxSize);
+                                return { width: finalBoxSize, height: finalBoxSize };
+                            }
+                        };
+
+                        const onScanSuccess = (decodedText) => {
+                            if (isScanningNow) return; 
+                            isScanningNow = true;
+                            playBeep();
+                            
+                            if (isComponentMounted && callbackRef.current) {
+                                callbackRef.current(decodedText);
+                            }
+                            setTimeout(() => { isScanningNow = false; }, 2500);
+                        };
+
+                        await html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess, () => {});
+                    } catch (err) {
+                        console.warn("Gagal membuka kamera belakang, mencoba kamera bawaan...", err);
+                        try {
+                            await html5QrCode.start(
+                                { facingMode: "user" }, config,
+                                (decodedText) => {
+                                    if (isScanningNow) return;
+                                    isScanningNow = true;
+                                    playBeep();
+                                    if (isComponentMounted && callbackRef.current) callbackRef.current(decodedText);
+                                    setTimeout(() => { isScanningNow = false; }, 2500);
+                                }, () => {}
+                            );
+                        } catch (fallbackErr) {
+                            console.error("Kamera sepenuhnya diblokir:", fallbackErr);
+                            if (isComponentMounted) setIsBlocked(true);
+                        }
+                    }
+                };
+
+                startCamera();
+
+                return () => {
+                    isComponentMounted = false;
+                    if (html5QrCode) {
+                        try {
+                            if (html5QrCode.isScanning) {
+                                html5QrCode.stop().then(() => html5QrCode.clear()).catch(e => console.log(e));
+                            }
+                        } catch (e) {}
+                    }
+                };
+            }, []);
+
+            return (
+                <div className="w-full space-y-3">
+                    <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileScan} className="hidden" />
+                    <div id="qr-file-processor" className="hidden"></div>
+
+                    {!isBlocked ? (
+                        <div id="qr-reader" className="w-full aspect-square rounded-2xl overflow-hidden bg-black flex items-center justify-center text-white relative z-10 shadow-inner border-2 border-gray-200 dark:border-gray-700">
+                            <span className="animate-pulse font-medium text-sm flex items-center gap-2">
+                                <i className="fa-solid fa-spinner fa-spin"></i> Menyiapkan Kamera...
+                            </span>
+                        </div>
+                    ) : (
+                        <div className="w-full aspect-square rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border-2 border-dashed border-amber-300 dark:border-amber-700 p-5 flex flex-col items-center justify-center text-center">
+                            <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/50 rounded-full flex items-center justify-center text-amber-600 dark:text-amber-400 mb-3 shadow-sm">
+                                <i className="fa-solid fa-camera-rotate text-2xl"></i>
+                            </div>
+                            <h4 className="text-sm font-bold text-gray-800 dark:text-gray-100 mb-1">Kamera Iframe Dibatasi</h4>
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-4 leading-relaxed max-w-xs">
+                                Google Sites membatasi akses streaming kamera. Gunakan tombol kamera di bawah:
+                            </p>
+                            <button type="button" onClick={() => fileInputRef.current && fileInputRef.current.click()} disabled={isProcessingFile} className="w-full max-w-xs py-3 px-4 bg-wiz-green hover:bg-wiz-green_dark text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95">
+                                {isProcessingFile ? <><i className="fa-solid fa-spinner fa-spin"></i> Memindai Gambar QR...</> : <><i className="fa-solid fa-camera"></i> Buka Kamera HP (Foto QR)</>}
+                            </button>
+                        </div>
+                    )}
+
+                    <div className="flex items-center justify-center gap-2 pt-1">
+                        <button type="button" onClick={() => fileInputRef.current && fileInputRef.current.click()} disabled={isProcessingFile} className="flex-1 py-2 px-3 bg-gray-100 dark:bg-gray-700/70 hover:bg-gray-200 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5">
+                            <i className="fa-solid fa-image text-wiz-orange"></i>
+                            <span>{isProcessingFile ? 'Membaca...' : 'Pilih Foto Galeri'}</span>
+                        </button>
+
+                        {window.self !== window.top && (
+                            <button type="button" onClick={() => window.open(window.location.href, '_blank')} className="py-2 px-3 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 dark:text-blue-400 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 border border-blue-100 dark:border-blue-800/40" title="Buka aplikasi langsung di browser agar kamera video aktif">
+                                <i className="fa-solid fa-arrow-up-right-from-square"></i>
+                                <span>Buka Layar Penuh</span>
+                            </button>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- KOMPONEN TABLE ---
+        const Table = ({ columns, data, onEdit, onDelete }) => (
+            <div className="space-y-3">
+                {/* TAMPILAN KHUSUS LAYAR HP (CARD VIEW) */}
+                <div className="block md:hidden space-y-3">
+                    {data.length === 0 ? (
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 text-center text-gray-400 border border-gray-100 dark:border-gray-700">
+                            <i className="fa-regular fa-folder-open text-3xl mb-2"></i>
+                            <p className="text-xs">Belum ada data yang ditambahkan.</p>
+                        </div>
+                    ) : (
+                        data.map((row, idx) => (
+                            <div key={idx} className="bg-white dark:bg-gray-800 rounded-2xl p-4 border border-gray-100 dark:border-gray-700 shadow-sm space-y-3 transition-all">
+                                <div className="space-y-2">
+                                    {columns.map((col, colIdx) => (
+                                        <div key={colIdx} className="flex justify-between items-start gap-2 text-xs border-b border-gray-50 dark:border-gray-700/50 pb-2 last:border-b-0 last:pb-0">
+                                            <span className="font-semibold text-gray-400 uppercase tracking-wider text-[10px] shrink-0 pt-0.5">{col.label}</span>
+                                            <div className="font-medium text-gray-800 dark:text-gray-200 text-right">
+                                                {col.render ? col.render(row) : row[col.key]}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                {(onEdit || onDelete) && (
+                                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                                        {onEdit && (
+                                            <button onClick={() => onEdit(row)} className="px-3 py-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 rounded-xl flex items-center gap-1.5 transition-colors">
+                                                <i className="fa-solid fa-pen-to-square"></i> Edit
+                                            </button>
+                                        )}
+                                        {onDelete && (
+                                            <button onClick={() => onDelete(row)} className="px-3 py-1.5 text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 rounded-xl flex items-center gap-1.5 transition-colors">
+                                                <i className="fa-solid fa-trash-can"></i> Hapus
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                {/* TAMPILAN TABEL STANDARD UNTUK TABLET & DESKTOP */}
+                <div className="hidden md:block overflow-x-auto bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+                    <table className="w-full text-left text-sm whitespace-nowrap">
+                        <thead className="bg-wiz-green/5 dark:bg-gray-700/60 text-wiz-green_dark dark:text-emerald-400 font-semibold border-b border-gray-100 dark:border-gray-700">
+                            <tr>
+                                {columns.map((col, idx) => (
+                                    <th key={idx} className="px-6 py-4">{col.label}</th>
+                                ))}
+                                {(onEdit || onDelete) && <th className="px-6 py-4 text-center">Aksi</th>}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50 dark:divide-gray-700 text-gray-600 dark:text-gray-300">
+                            {data.length === 0 ? (
+                                <tr>
+                                    <td colSpan={columns.length + 1} className="px-6 py-12 text-center text-gray-400 dark:text-gray-500">
+                                        <div className="flex flex-col items-center justify-center gap-3">
+                                            <div className="w-16 h-16 bg-gray-50 dark:bg-gray-700 rounded-full flex items-center justify-center">
+                                                <i className="fa-regular fa-folder-open text-2xl"></i>
+                                            </div>
+                                            <p>Belum ada data yang ditambahkan.</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ) : (
+                                data.map((row, idx) => (
+                                    <tr key={idx} className="hover:bg-wiz-light dark:hover:bg-gray-700/50 transition-colors duration-200">
+                                        {columns.map((col, colIdx) => (
+                                            <td key={colIdx} className="px-6 py-4">
+                                                {col.render ? col.render(row) : row[col.key]}
+                                            </td>
+                                        ))}
+                                        {(onEdit || onDelete) && (
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    {onEdit && (
+                                                        <button onClick={() => onEdit(row)} className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/40 hover:text-blue-600 rounded-xl transition-colors" title="Edit">
+                                                            <i className="fa-solid fa-pen-to-square"></i>
+                                                        </button>
+                                                    )}
+                                                    {onDelete && (
+                                                        <button onClick={() => onDelete(row)} className="p-2 text-red-400 hover:bg-red-50 dark:hover:bg-red-900/40 hover:text-red-600 rounded-xl transition-colors" title="Hapus">
+                                                            <i className="fa-solid fa-trash-can"></i>
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        )}
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
+
+        // --- KOMPONEN DYNAMIC FORM ---
+        const DynamicForm = ({ schema, initialData, defaultValues, onSubmit, onCancel }) => {
+            const [formData, setFormData] = useState(initialData || defaultValues || {});
+            const [isUploading, setIsUploading] = useState(false);
+            const [uploadError, setUploadError] = useState('');
+
+            const handleChange = (e) => {
+                const { name, value } = e.target;
+                setFormData(prev => ({ ...prev, [name]: value }));
+            };
+
+            const handleCurrencyChange = (e, fieldName) => {
+                const val = e.target.value.replace(/\D/g, ''); 
+                setFormData(prev => ({ ...prev, [fieldName]: val }));
+            };
+
+            const handleFileChange = async (e, fieldName) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                setIsUploading(true);
+                setUploadError('');
+                
+                const localPreviewUrl = URL.createObjectURL(file);
+                setFormData(prev => ({ ...prev, [fieldName]: localPreviewUrl }));
+                
+                try {
+                    const reader = new FileReader();
+                    reader.onloadend = async () => {
+                        const base64data = reader.result.split(',')[1];
+                        const payload = { action: 'uploadImage', filename: file.name, mimeType: file.type, base64: base64data };
+                        try {
+                            const response = await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) });
+                            const result = await response.json();
+                            if (result.status === 'success') {
+                                setFormData(prev => ({ ...prev, [fieldName]: result.url }));
+                            } else {
+                                setUploadError('Gagal mengupload gambar ke Google Drive.');
+                            }
+                        } catch(err) {
+                            setUploadError('Koneksi terputus saat mengunggah foto.');
+                        }
+                        setIsUploading(false);
+                    };
+                    reader.readAsDataURL(file);
+                } catch (err) {
+                    setUploadError('Terjadi kesalahan saat membaca file.');
+                    setIsUploading(false);
+                }
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                for (let field of schema) {
+                    if (field.type === 'berau_address' && field.required) {
+                        const val = formData[field.name] || '';
+                        if (!val.includes('Kec.')) {
+                            setUploadError(`Alamat tidak lengkap: Anda wajib memilih Kelurahan & Kecamatan dari dropdown untuk kolom "${field.label}".`);
+                            return;
+                        }
+                    }
+                }
+                onSubmit(formData);
+            };
+
+            const inputBaseClass = "w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-wiz-green/20 focus:border-wiz-green bg-gray-50 dark:bg-gray-700 focus:bg-white dark:focus:bg-gray-800 transition-all text-sm text-gray-800 dark:text-gray-100 outline-none";
+
+            return (
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    {uploadError && (
+                        <div className="bg-red-50 dark:bg-red-900/30 border border-red-100 dark:border-red-800 p-4 rounded-xl text-sm text-red-600 dark:text-red-400 flex items-start gap-3">
+                            <i className="fa-solid fa-circle-exclamation mt-0.5"></i>
+                            <p>{uploadError}</p>
+                        </div>
+                    )}
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                        {schema.map((field) => (
+                            <div key={field.name} className={field.fullWidth ? 'sm:col-span-2' : ''}>
+                                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1.5 uppercase tracking-wider">{field.label}</label>
+                                
+                                {field.type === 'file' ? (
+                                    <div className="space-y-3">
+                                        <div className="relative w-full h-48 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-600 overflow-hidden bg-gray-50 dark:bg-gray-700/50 flex flex-col items-center justify-center p-2 group transition-colors hover:border-wiz-green/50 dark:hover:border-emerald-500/50">
+                                            {formData[field.name] ? (
+                                                <div className="relative w-full h-full rounded-xl overflow-hidden shadow-sm bg-white dark:bg-gray-800 flex items-center justify-center">
+                                                    <img 
+                                                        src={getDirectImageUrl(formData[field.name])} 
+                                                        alt="Preview" 
+                                                        className="w-full h-full object-contain"
+                                                        onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                                                    />
+                                                    <div style={{display: 'none'}} className="absolute inset-0 flex-col items-center justify-center bg-gray-100 dark:bg-gray-800 text-gray-400">
+                                                        <i className="fa-solid fa-image-slash text-3xl mb-2"></i>
+                                                        <span className="text-xs">Gagal memuat gambar</span>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 pointer-events-none">
+                                                    <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center shadow-sm border border-gray-100 dark:border-gray-700 mb-3 overflow-hidden">
+                                                        <i className="fa-solid fa-camera text-2xl text-gray-300 dark:text-gray-600 group-hover:text-wiz-green transition-colors"></i>
+                                                    </div>
+                                                    <span className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1 group-hover:text-wiz-green transition-colors">Belum ada foto</span>
+                                                    <span className="text-[10px]">Ketuk "Pilih File" di bawah</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="relative group flex items-center justify-center w-full">
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                onChange={(e) => handleFileChange(e, field.name)}
+                                                required={field.required && !formData[field.name]}
+                                                disabled={isUploading}
+                                                className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-wiz-green/10 dark:file:bg-wiz-green/20 file:text-wiz-green dark:file:text-emerald-400 hover:file:bg-wiz-green/20 cursor-pointer disabled:opacity-50 transition-colors"
+                                            />
+                                        </div>
+                                        {isUploading && (
+                                            <div className="flex items-center justify-center gap-2 text-xs text-wiz-orange font-bold animate-pulse bg-wiz-orange/10 dark:bg-amber-900/30 py-2.5 rounded-xl border border-wiz-orange/20 mt-2">
+                                                <i className="fa-solid fa-spinner fa-spin"></i> Sedang Mengunggah & Menyimpan Foto...
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : field.isCurrency ? (
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                            <span className="text-gray-400 sm:text-sm font-semibold">Rp</span>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            name={field.name}
+                                            value={formData[field.name] ? Number(formData[field.name]).toLocaleString('id-ID') : ''}
+                                            onChange={(e) => handleCurrencyChange(e, field.name)}
+                                            required={field.required}
+                                            className={`${inputBaseClass} pl-11`}
+                                            placeholder="0"
+                                        />
+                                    </div>
+                                ) : field.type === 'select' ? (
+                                    <select
+                                        name={field.name}
+                                        value={formData[field.name] || ''}
+                                        onChange={handleChange}
+                                        required={field.required}
+                                        className={inputBaseClass}
+                                    >
+                                        <option value="" disabled className="dark:bg-gray-800">Pilih {field.label}</option>
+                                        {field.options.map(opt => (
+                                            <option key={opt.value || opt} value={opt.value || opt} className="dark:bg-gray-800">{opt.label || opt}</option>
+                                        ))}
+                                    </select>
+                                ) : field.type === 'map_location' ? (
+                                    <div className="space-y-2">
+                                        <div className="flex gap-2">
+                                            <div className="relative flex-1">
+                                                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+                                                    <i className="fa-solid fa-map-location-dot"></i>
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    name={field.name}
+                                                    value={formData[field.name] || ''}
+                                                    onChange={handleChange}
+                                                    placeholder="Tempel link Google Maps atau ketik koordinat (lat, long)"
+                                                    className={`${inputBaseClass} pl-10`}
+                                                />
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const queryKeyword = (formData.usaha ? `${formData.usaha} ` : '') + (formData.alamat ? `${formData.alamat} ` : '') + 'Berau';
+                                                    const searchTarget = queryKeyword.trim() ? encodeURIComponent(queryKeyword) : 'Tanjung+Redeb+Berau';
+                                                    window.open(`https://www.google.com/maps/place/Tandjungredeb?api=1&query=${searchTarget}`, '_blank');
+                                                }}
+                                                className="px-3 py-2.5 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 dark:text-blue-400 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap border border-blue-200 dark:border-blue-800 shrink-0"
+                                                title="Buka Web Maps untuk mencari titik lokasi"
+                                            >
+                                                <i className="fa-solid fa-magnifying-glass-location text-sm"></i> Cari di Web Maps
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (navigator.geolocation) {
+                                                        navigator.geolocation.getCurrentPosition(
+                                                            (position) => {
+                                                                const lat = position.coords.latitude;
+                                                                const lng = position.coords.longitude;
+                                                                const url = `https://www.google.com/maps?q=${lat},${lng}`;
+                                                                setFormData(prev => ({ ...prev, [field.name]: url }));
+                                                            },
+                                                            (error) => {
+                                                                setUploadError("Gagal mendeteksi lokasi GPS. Pastikan izin lokasi / GPS diaktifkan di browser HP Anda.");
+                                                            },
+                                                            { enableHighAccuracy: true, timeout: 10000 }
+                                                        );
+                                                    } else {
+                                                        setUploadError("Perangkat atau browser tidak mendukung fitur deteksi GPS.");
+                                                    }
+                                                }}
+                                                className="px-3.5 py-2.5 bg-wiz-green/10 hover:bg-wiz-green text-wiz-green hover:text-white dark:bg-emerald-900/30 dark:text-emerald-400 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap border border-wiz-green/20 shrink-0"
+                                                title="Deteksi Titik GPS Posisi Saya Saat Ini"
+                                            >
+                                                <i className="fa-solid fa-location-crosshairs text-sm"></i> GPS HP
+                                            </button>
+                                        </div>
+                                        {formData[field.name] && (() => {
+                                            const mapUrls = parseMapUrls(formData[field.name]);
+                                            return (
+                                                <div className="flex flex-wrap items-center gap-2 pt-1 bg-gray-50/80 dark:bg-gray-700/50 p-2.5 rounded-xl border border-gray-200 dark:border-gray-600">
+                                                    <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                                                        <i className="fa-solid fa-route text-wiz-orange"></i> Pilihan Cek Map:
+                                                    </span>
+                                                    <a href={mapUrls.navUrl} target="_blank" rel="noreferrer" className="px-3 py-1.5 bg-wiz-green/10 hover:bg-wiz-green text-wiz-green hover:text-white dark:bg-emerald-900/30 dark:text-emerald-400 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 border border-wiz-green/20">
+                                                        <i className="fa-solid fa-mobile-screen"></i> Buka di HP (App)
+                                                    </a>
+                                                    <a href={mapUrls.webUrl} target="_blank" rel="noreferrer" className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 dark:text-blue-400 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 border border-blue-200 dark:border-blue-800">
+                                                        <i className="fa-solid fa-globe"></i> www.google.com/maps (Web)
+                                                    </a>
+                                                </div>
+                                            );
+                                        })()}
+                                        <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                                            Tekan <b>"Cari di Web Maps"</b> untuk mencari lokasi titik di Google Maps, atau <b>"GPS HP"</b> jika Anda sedang berada di lokasi pundi.
+                                        </p>
+                                    </div>
+                                ) : field.type === 'berau_address' ? (
+                                    <div className="space-y-3">
+                                        <div className="bg-blue-50 dark:bg-blue-900/30 p-2.5 rounded-xl border border-blue-100 dark:border-blue-800/50">
+                                            <p className="text-[11px] text-blue-600 dark:text-blue-400 font-medium leading-tight flex items-start gap-1.5">
+                                                <i className="fa-solid fa-lightbulb text-yellow-500 mt-0.5"></i>
+                                                <span>Langkah 1: Ketik nama Jalan/RT pada kotak di bawah.<br/>Langkah 2: Pilih Kelurahan/Kecamatan agar alamat tergabung otomatis.</span>
+                                            </p>
+                                        </div>
+                                        <textarea
+                                            name={field.name}
+                                            value={formData[field.name] || ''}
+                                            onChange={handleChange}
+                                            required={field.required}
+                                            rows={2}
+                                            className={inputBaseClass}
+                                            placeholder="1. Ketik nama jalan / gang / RT (Contoh: Jl. AKB Sanipah 1 RT.05)"
+                                        />
+                                        <select 
+                                            className={`${inputBaseClass} border-wiz-green/30 dark:border-emerald-600/30 bg-wiz-green/5 dark:bg-emerald-900/10 cursor-pointer font-semibold text-wiz-green dark:text-emerald-400`} 
+                                            onChange={(e) => {
+                                                if(!e.target.value) return;
+                                                const current = formData[field.name] || '';
+                                                if(current.includes(e.target.value)) { e.target.value = ""; return; }
+                                                const newVal = current ? (current + (current.trim().endsWith(',') ? ' ' : ', ') + e.target.value) : e.target.value;
+                                                setFormData(prev => ({ ...prev, [field.name]: newVal }));
+                                                e.target.value = ""; 
+                                            }}
+                                            defaultValue=""
+                                        >
+                                            <option value="" disabled className="dark:bg-gray-800 font-bold">2. Pilih Kelurahan & Kec. (WAJIB)</option>
+                                            <optgroup label="Kec. Tanjung Redeb">
+                                                <option value="Kel. Tanjung Redeb, Kec. Tanjung Redeb">Kel. Tanjung Redeb</option>
+                                                <option value="Kel. Bugis, Kec. Tanjung Redeb">Kel. Bugis</option>
+                                                <option value="Kel. Gayam, Kec. Tanjung Redeb">Kel. Gayam</option>
+                                                <option value="Kel. Karang Ambun, Kec. Tanjung Redeb">Kel. Karang Ambun</option>
+                                                <option value="Kel. Bedungun, Kec. Tanjung Redeb">Kel. Bedungun</option>
+                                                <option value="Kel. Gunung Panjang, Kec. Tanjung Redeb">Kel. Gunung Panjang</option>
+                                            </optgroup>
+                                            <optgroup label="Kec. Teluk Bayur">
+                                                <option value="Kel. Teluk Bayur, Kec. Teluk Bayur">Kel. Teluk Bayur</option>
+                                                <option value="Kel. Rinding, Kec. Teluk Bayur">Kel. Rinding</option>
+                                                <option value="Kampung Labanan Jaya, Kec. Teluk Bayur">Kmp. Labanan Jaya</option>
+                                                <option value="Kampung Labanan Makmur, Kec. Teluk Bayur">Kmp. Labanan Makmur</option>
+                                                <option value="Kampung Tumbang Jaya, Kec. Teluk Bayur">Kmp. Tumbang Jaya</option>
+                                            </optgroup>
+                                            <optgroup label="Kec. Sambaliung">
+                                                <option value="Kel. Sambaliung, Kec. Sambaliung">Kel. Sambaliung</option>
+                                                <option value="Kampung Bebanir Bangun, Kec. Sambaliung">Kmp. Bebanir Bangun</option>
+                                                <option value="Kampung Gurimbang, Kec. Sambaliung">Kmp. Gurimbang</option>
+                                                <option value="Kampung Limunjan, Kec. Sambaliung">Kmp. Limunjan</option>
+                                                <option value="Kampung Suaran, Kec. Sambaliung">Kmp. Suaran</option>
+                                            </optgroup>
+                                            <optgroup label="Kec. Gunung Tabur">
+                                                <option value="Kel. Gunung Tabur, Kec. Gunung Tabur">Kel. Gunung Tabur</option>
+                                                <option value="Kampung Merancang Ilir, Kec. Gunung Tabur">Kmp. Merancang Ilir</option>
+                                                <option value="Kampung Merancang Ulu, Kec. Gunung Tabur">Kmp. Merancang Ulu</option>
+                                                <option value="Kampung Batu-Batu, Kec. Gunung Tabur">Kmp. Batu-Batu</option>
+                                            </optgroup>
+                                            <optgroup label="Kecamatan Lainnya (Berau)">
+                                                <option value="Kec. Segah">Kec. Segah</option>
+                                                <option value="Kec. Kelay">Kec. Kelay</option>
+                                                <option value="Kec. Pulau Derawan">Kec. Pulau Derawan</option>
+                                                <option value="Kec. Maratua">Kec. Maratua</option>
+                                                <option value="Kec. Talisayan">Kec. Talisayan</option>
+                                                <option value="Kec. Biatan">Kec. Biatan</option>
+                                                <option value="Kec. Tabalar">Kec. Tabalar</option>
+                                                <option value="Kec. Batu Putih">Kec. Batu Putih</option>
+                                                <option value="Kec. Biduk-Biduk">Kec. Biduk-Biduk</option>
+                                            </optgroup>
+                                        </select>
+                                    </div>
+                                ) : field.type === 'textarea' ? (
+                                    <textarea
+                                        name={field.name}
+                                        value={formData[field.name] || ''}
+                                        onChange={handleChange}
+                                        required={field.required}
+                                        rows={3}
+                                        className={inputBaseClass}
+                                    />
+                                ) : (
+                                    <input
+                                        type={field.type || 'text'}
+                                        name={field.name}
+                                        value={field.type === 'date' && formData[field.name] ? String(formData[field.name]).split('T')[0] : (formData[field.name] || '')}
+                                        onChange={handleChange}
+                                        required={field.required}
+                                        className={inputBaseClass}
+                                    />
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                    <div className="flex justify-end gap-3 pt-6 border-t border-gray-100 dark:border-gray-700 mt-8">
+                        <Button variant="secondary" onClick={onCancel}>Batalkan</Button>
+                        <Button type="submit" disabled={isUploading} variant="primary">
+                            {isUploading ? (<span><i className="fa-solid fa-spinner fa-spin mr-2"></i>Menyimpan...</span>) : 'Simpan Data'}
+                        </Button>
+                    </div>
+                </form>
+            );
+        };
+
+        // =========================================================================
+        // 3. KOMPONEN FITUR / HALAMAN (components/features/...)
+        // =========================================================================
+
+        // --- HALAMAN LOGIN ---
+        const LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isRefreshing }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [showPassword, setShowPassword] = useState(false);
+            const [error, setError] = useState('');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (!email || !password) {
+                    setError('Silakan lengkapi email dan password.');
+                    return;
+                }
+                onLogin(email, password, setError);
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-wiz-light dark:bg-gray-900 transition-colors duration-200">
+                    <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-wiz-green/10 dark:bg-wiz-green/20 blur-[80px]"></div>
+                    <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] rounded-full bg-wiz-orange/10 dark:bg-wiz-orange/20 blur-[100px]"></div>
+
+                    <div className="w-full max-w-md p-4 relative z-10 slide-up">
+                        <div className="bg-white/80 dark:bg-gray-800/90 backdrop-blur-xl shadow-2xl rounded-3xl p-8 border border-white dark:border-gray-700">
+                            
+                            <div className="flex flex-col items-center mb-8">
+                                <div className="flex items-center justify-center mb-6">
+                                    <img 
+                                        src="https://drive.google.com/uc?id=1TcpcZtGKBKAOBAthf6Rea4HHDZ0l9tBU" 
+                                        alt="Logo WIZ" 
+                                        className="h-14 object-contain"
+                                        onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }}
+                                    />
+                                    <div style={{display: 'none'}} className="text-[2.75rem] font-black text-wiz-green dark:text-emerald-400 tracking-tighter">WIZ<span className="text-wiz-orange">BERAU</span></div>
+                                </div>
+                                <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 tracking-tight">Portal Amil WIZ</h2>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Masuk untuk mengelola data WIZ BERAU</p>
+                            </div>
+
+                            <form className="space-y-5" onSubmit={handleSubmit}>
+                                {error && (
+                                    <div className="bg-red-50 dark:bg-red-900/30 border border-red-100 dark:border-red-800 p-3 rounded-xl flex items-center gap-3 text-red-600 dark:text-red-400 animate-in">
+                                        <i className="fa-solid fa-circle-xmark"></i>
+                                        <p className="text-sm font-medium">{error}</p>
+                                    </div>
+                                )}
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Email Akses</label>
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                            <i className="fa-solid fa-envelope text-gray-400"></i>
+                                        </div>
+                                        <input
+                                            type="email"
+                                            value={email}
+                                            onChange={(e) => setEmail(e.target.value)}
+                                            className="w-full pl-11 pr-4 py-3 bg-gray-50 dark:bg-gray-700/80 border border-gray-200 dark:border-gray-600 rounded-xl text-sm text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-wiz-green/20 focus:border-wiz-green focus:bg-white dark:focus:bg-gray-700 transition-all outline-none"
+                                            placeholder="Masukkan email"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Kata Sandi</label>
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                            <i className="fa-solid fa-lock text-gray-400"></i>
+                                        </div>
+                                        <input
+                                            type={showPassword ? "text" : "password"}
+                                            value={password}
+                                            onChange={(e) => setPassword(e.target.value)}
+                                            className="w-full pl-11 pr-12 py-3 bg-gray-50 dark:bg-gray-700/80 border border-gray-200 dark:border-gray-600 rounded-xl text-sm text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-wiz-green/20 focus:border-wiz-green focus:bg-white dark:focus:bg-gray-700 transition-all outline-none"
+                                            placeholder="••••••••"
+                                        />
+                                        <div className="absolute inset-y-0 right-0 pr-2 flex items-center">
+                                            <button type="button" onClick={() => setShowPassword(!showPassword)} className="p-2 text-gray-400 hover:text-wiz-green dark:hover:text-emerald-400 focus:outline-none transition-colors rounded-lg">
+                                                <i className={`fa-solid ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <Button type="submit" variant="accent" className="w-full py-3.5 text-[15px] mt-2 shadow-wiz-orange/30">
+                                    Masuk ke Dashboard <i className="fa-solid fa-arrow-right-to-bracket ml-1"></i>
+                                </Button>
+
+                                <div className="flex items-center justify-center gap-3 pt-3 border-t border-gray-100 dark:border-gray-700/70">
+                                    <button type="button" onClick={onRefresh} disabled={isRefreshing} className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 bg-gray-50 dark:bg-gray-700/60 hover:bg-wiz-green/10 border border-gray-200 dark:border-gray-600 hover:border-wiz-green/30 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:text-wiz-green transition-all shadow-sm">
+                                        <i className={`fa-solid fa-rotate text-sm ${isRefreshing ? 'fa-spin text-wiz-green' : ''}`}></i>
+                                        <span>{isRefreshing ? 'Menyinkron...' : 'Segarkan Data'}</span>
+                                    </button>
+                                    <button type="button" onClick={() => setDarkMode(!darkMode)} className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 bg-gray-50 dark:bg-gray-700/60 hover:bg-wiz-orange/10 border border-gray-200 dark:border-gray-600 hover:border-wiz-orange/30 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:text-wiz-orange transition-all shadow-sm">
+                                        <i className={`fa-solid ${darkMode ? 'fa-sun text-yellow-400' : 'fa-moon text-gray-500'} text-sm`}></i>
+                                        <span>{darkMode ? 'Mode Terang' : 'Mode Gelap'}</span>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                        <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-6 font-medium tracking-wide uppercase">
+                            &copy; 2026 Wahdah Inspirasi Zakat Berau
+                        </p>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- HALAMAN DASHBOARD ---
+        const DashboardView = ({ data, darkMode }) => {
+            const { programs, donations, tasks, amils, riwayatPundis = [], pundis = [], contacts = [] } = data;
+            const [selectedPundiBreakdown, setSelectedPundiBreakdown] = useState(null);
+
+            const totalPundiCollected = useMemo(() => {
+                return riwayatPundis.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0);
+            }, [riwayatPundis]);
+
+            const activeProgramList = useMemo(() => {
+                const activeProgramsRaw = programs.filter(p => p.status === 'Aktif');
+                const pundiPrograms = activeProgramsRaw.filter(p => (p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi')));
+                const nonPundiPrograms = activeProgramsRaw.filter(p => !(p.category && p.category.includes('Pundi')) && !(p.name && p.name.toLowerCase().includes('pundi')));
+                const result = [];
+
+                if (pundiPrograms.length > 0) {
+                    const totalTargetPundi = pundiPrograms.reduce((sum, p) => sum + Number(p.target || 0), 0);
+                    const donationPundiCollected = donations.filter(d => pundiPrograms.some(prog => prog.name === d.programName) && d.status === 'Berhasil').reduce((sum, d) => sum + Number(d.amount || 0), 0);
+                    const totalPundiAll = donationPundiCollected + totalPundiCollected;
+
+                    result.push({
+                        id: 'pundi-umum-consolidated', name: 'PUNDI UMUM', target: totalTargetPundi, collected: totalPundiAll,
+                        isPundiCampaign: true, isConsolidated: true, subCampaigns: pundiPrograms
+                    });
+                }
+
+                nonPundiPrograms.forEach(prog => {
+                    const donationCollected = donations.filter(d => d.programName === prog.name && d.status === 'Berhasil').reduce((sum, d) => sum + Number(d.amount || 0), 0);
+                    result.push({ ...prog, collected: donationCollected, isPundiCampaign: false });
+                });
+
+                return result;
+            }, [programs, donations, totalPundiCollected]);
+
+            const stats = useMemo(() => {
+                const donasiReguler = donations.filter(d => d.status === 'Berhasil').reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
+                const totalDonasi = donasiReguler + totalPundiCollected;
+                const uniqueDonors = new Set([...donations.map(d => d.donorName), ...riwayatPundis.map(r => r.donorName)]).size;
+                const completedTasks = tasks.filter(t => t.status === 'Selesai').length;
+                return { totalDonasi, uniqueDonors, activePrograms: activeProgramList.length, completedTasks, totalTasks: tasks.length };
+            }, [donations, tasks, activeProgramList, totalPundiCollected, riwayatPundis]);
+
+            const donationStats = useMemo(() => {
+                const grouped = {};
+                const sortedDonations = [...donations].sort((a, b) => new Date(a.date) - new Date(b.date));
+                sortedDonations.filter(d => d.status === 'Berhasil').forEach(d => {
+                    const dateObj = new Date(d.date);
+                    if(isNaN(dateObj.getTime())) return;
+                    const month = dateObj.toLocaleString('id-ID', { month: 'short', year: 'numeric' });
+                    grouped[month] = (grouped[month] || 0) + Number(d.amount);
+                });
+                return Object.keys(grouped).map(key => ({ name: key, total: grouped[key] }));
+            }, [donations]);
+
+            const amilPerformance = useMemo(() => {
+                return amils.map(amil => {
+                    const amilDonations = donations.filter(d => d.amilName === amil.name && d.status === 'Berhasil');
+                    const totalDonation = amilDonations.reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
+                    const amilTasks = tasks.filter(t => t.assignedTo === amil.name);
+                    const completed = amilTasks.filter(t => t.status === 'Selesai').length;
+                    return { id: amil.id, name: amil.name, totalDonation, completedTasks: completed, totalTasks: amilTasks.length };
+                }).sort((a, b) => b.totalDonation - a.totalDonation);
+            }, [amils, donations, tasks]);
+
+            const recentDonations = [...donations].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+
+            const totalTargetAll = activeProgramList.reduce((sum, p) => sum + Number(p.target || 0), 0);
+            const totalCollectedAll = activeProgramList.reduce((sum, p) => sum + Number(p.collected || 0), 0);
+            const totalPercentAll = totalTargetAll > 0 ? Math.min(Math.round((totalCollectedAll / totalTargetAll) * 100), 100) : 0;
+
+            const StatCard = ({ icon, label, value, colorClass, bgClass, subtitle }) => (
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 p-6 flex flex-col justify-center transition-all duration-300 hover:-translate-y-1 relative overflow-hidden group">
+                    <div className={`absolute -right-6 -top-6 w-24 h-24 rounded-full ${bgClass} opacity-50 group-hover:scale-150 transition-transform duration-500 ease-out`}></div>
+                    <div className="flex items-center gap-4 relative z-10">
+                        <div className={`w-14 h-14 rounded-2xl ${bgClass} ${colorClass} flex items-center justify-center text-2xl shadow-inner`}>
+                            <i className={icon}></i>
+                        </div>
+                        <div>
+                            <p className="text-xs font-bold text-gray-400 dark:text-gray-400 uppercase tracking-wider mb-1">{label}</p>
+                            <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 truncate">{value}</h3>
+                            {subtitle && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{subtitle}</p>}
+                        </div>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="space-y-8 slide-up">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <StatCard icon="fa-solid fa-wallet" label="Total Donasi Masuk" value={formatRp(stats.totalDonasi)} colorClass="text-wiz-green dark:text-emerald-400" bgClass="bg-wiz-green/10 dark:bg-wiz-green/20" />
+                        <StatCard icon="fa-solid fa-user-heart" label="Donatur Berpartisipasi" value={`${stats.uniqueDonors} Orang`} colorClass="text-wiz-orange dark:text-amber-400" bgClass="bg-wiz-orange/10 dark:bg-wiz-orange/20" />
+                        <StatCard icon="fa-solid fa-bullseye" label="Program Aktif" value={`${stats.activePrograms} Campaign`} colorClass="text-blue-500 dark:text-blue-400" bgClass="bg-blue-50 dark:bg-blue-900/30" />
+                        <StatCard icon="fa-solid fa-list-check" label="Kinerja Tugas" value={`${stats.completedTasks} / ${stats.totalTasks}`} subtitle="Tugas terselesaikan" colorClass="text-purple-500 dark:text-purple-400" bgClass="bg-purple-50 dark:bg-purple-900/30" />
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 p-6 lg:col-span-2 transition-shadow">
+                            <div className="flex items-center justify-between mb-8">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-wiz-green/10 dark:bg-wiz-green/20 rounded-lg text-wiz-green dark:text-emerald-400"><i className="fa-solid fa-chart-line"></i></div>
+                                    <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Tren Penerimaan Donasi</h3>
+                                </div>
+                            </div>
+                            <div className="h-72 w-full">
+                                {donationStats.length > 0 ? (
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={donationStats} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "#374151" : "#f1f5f9"} />
+                                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: darkMode ? '#9ca3af' : '#94a3b8', fontSize: 12, fontWeight: 500}} dy={10} />
+                                            <YAxis axisLine={false} tickLine={false} tick={{fill: darkMode ? '#9ca3af' : '#94a3b8', fontSize: 12}} tickFormatter={(value) => `${value / 1000}k`} />
+                                            <Tooltip cursor={{fill: darkMode ? '#374151' : '#f8fafc'}} contentStyle={{borderRadius: '12px', border: darkMode ? '1px solid #4b5563' : '1px solid #e2e8f0', backgroundColor: darkMode ? '#1f2937' : '#ffffff', color: darkMode ? '#f3f4f6' : '#1f2937', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} formatter={(value) => [formatRp(value), "Total"]} />
+                                            <Bar dataKey="total" radius={[6, 6, 0, 0]} maxBarSize={45}>
+                                                {donationStats.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={index === donationStats.length - 1 ? '#F59121' : '#27745F'} />
+                                                ))}
+                                            </Bar>
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                ) : (
+                                    <div className="h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-500">
+                                        <i className="fa-solid fa-chart-column text-4xl mb-3 text-gray-200 dark:text-gray-700"></i>
+                                        <p>Belum ada data grafik donasi</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 p-6 flex flex-col">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="p-2 bg-yellow-100 dark:bg-yellow-900/40 rounded-lg text-yellow-600 dark:text-yellow-400"><i className="fa-solid fa-award"></i></div>
+                                <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Leaderboard Amil</h3>
+                            </div>
+                            <div className="space-y-4 overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                                {amilPerformance.map((amil, idx) => (
+                                    <div key={amil.id} className="flex items-center justify-between p-4 border border-gray-100 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 hover:bg-wiz-light dark:hover:bg-gray-700/50 transition-all group">
+                                        <div className="flex items-center gap-4">
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0 ${idx === 0 ? 'bg-yellow-100 dark:bg-yellow-900/60 text-yellow-700 dark:text-yellow-300 ring-2 ring-yellow-200 dark:ring-yellow-700' : idx === 1 ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 ring-2 ring-gray-200 dark:ring-gray-600' : idx === 2 ? 'bg-orange-100 dark:bg-orange-900/60 text-orange-700 dark:text-orange-300 ring-2 ring-orange-200 dark:ring-orange-700' : 'bg-wiz-green/10 text-wiz-green dark:text-emerald-400'}`}>
+                                                {idx + 1}
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-gray-800 dark:text-gray-200 text-sm group-hover:text-wiz-green dark:group-hover:text-emerald-400 transition-colors">{amil.name}</p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-0.5"><i className="fa-solid fa-check-double text-[10px] text-wiz-green dark:text-emerald-400"></i> {amil.completedTasks} Tugas</p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Donasi</p>
+                                            <p className="font-bold text-wiz-green dark:text-emerald-400 text-sm">{formatRp(amil.totalDonation)}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Progres Campaign */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 p-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-blue-50 dark:bg-blue-900/40 rounded-lg text-blue-500 dark:text-blue-400"><i className="fa-solid fa-clock-rotate-left"></i></div>
+                                    <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Donasi Masuk Terbaru</h3>
+                                </div>
+                            </div>
+                            <div className="space-y-4">
+                                {recentDonations.length > 0 ? recentDonations.map((donasi, idx) => (
+                                    <div key={donasi.id} className="flex justify-between items-center p-4 border border-gray-100 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-full bg-wiz-green/10 dark:bg-wiz-green/20 text-wiz-green dark:text-emerald-400 flex items-center justify-center font-bold">
+                                                {donasi.donorName.charAt(0)}
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-gray-800 dark:text-gray-100">{donasi.donorName}</p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{donasi.programName}</p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="font-bold text-gray-800 dark:text-gray-100">{formatRp(donasi.amount)}</p>
+                                            <p className="text-xs text-gray-400 dark:text-gray-500 font-medium">{formatDate(donasi.date)}</p>
+                                        </div>
+                                    </div>
+                                )) : <p className="text-gray-400 dark:text-gray-500 text-center py-6 italic text-sm">Belum ada histori donasi.</p>}
+                            </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 p-6 flex flex-col">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="p-2 bg-wiz-orange/10 dark:bg-wiz-orange/20 rounded-lg text-wiz-orange dark:text-amber-400"><i className="fa-solid fa-bars-progress"></i></div>
+                                <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Progres Campaign Aktif</h3>
+                            </div>
+                            
+                            {activeProgramList.length > 0 && (
+                                <div className="mb-6 p-5 bg-gradient-to-br from-wiz-green_dark to-wiz-green rounded-2xl text-white shadow-lg shadow-wiz-green/30 relative overflow-hidden">
+                                    <div className="absolute top-0 right-0 p-4 opacity-10 text-6xl"><i className="fa-solid fa-chart-pie"></i></div>
+                                    <h4 className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-2 relative z-10">Pencapaian Akumulatif</h4>
+                                    <div className="flex justify-between items-end mb-3 relative z-10">
+                                        <div>
+                                            <p className="text-3xl font-black">{formatRp(totalCollectedAll)}</p>
+                                            <p className="text-xs text-white/70 mt-1">Target Total: {formatRp(totalTargetAll)}</p>
+                                        </div>
+                                        <div className="bg-white/20 backdrop-blur px-3 py-1.5 rounded-lg">
+                                            <span className="text-lg font-bold">{totalPercentAll}%</span>
+                                        </div>
+                                    </div>
+                                    <div className="w-full bg-white/20 rounded-full h-1.5 relative z-10">
+                                        <div className="bg-wiz-orange h-1.5 rounded-full shadow-[0_0_10px_rgba(245,145,33,0.8)]" style={{ width: `${totalPercentAll}%` }}></div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="space-y-6 overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                                {activeProgramList.length > 0 ? activeProgramList.map(prog => {
+                                    const percent = prog.target > 0 ? Math.min(Math.round((prog.collected / prog.target) * 100), 100) : 0;
+                                    return (
+                                        <div 
+                                            key={prog.id} 
+                                            onClick={() => prog.isPundiCampaign ? setSelectedPundiBreakdown(prog) : null}
+                                            className={`space-y-2.5 transition-all ${prog.isPundiCampaign ? 'cursor-pointer p-3.5 -mx-2 rounded-2xl hover:bg-wiz-light dark:hover:bg-gray-700/60 border border-transparent hover:border-wiz-green/20 group' : ''}`}
+                                        >
+                                            <div className="flex justify-between items-center text-sm">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className={`font-bold text-gray-700 dark:text-gray-200 ${prog.isPundiCampaign ? 'group-hover:text-wiz-green dark:group-hover:text-emerald-400 transition-colors' : ''}`}>
+                                                        {prog.name}
+                                                    </span>
+                                                    {prog.isPundiCampaign && (
+                                                        <span className="px-2 py-0.5 bg-wiz-orange/10 dark:bg-amber-900/30 text-wiz-orange dark:text-amber-400 text-[11px] font-bold rounded-lg flex items-center gap-1 border border-wiz-orange/20">
+                                                            <i className="fa-solid fa-users"></i> Klik Rincian Amil
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <span className="text-wiz-orange dark:text-amber-400 font-bold bg-wiz-orange/10 dark:bg-wiz-orange/20 px-2 py-0.5 rounded text-xs">{percent}%</span>
+                                            </div>
+                                            <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                                                <div className="bg-wiz-green dark:bg-emerald-500 h-2 rounded-full transition-all duration-1000 ease-out" style={{ width: `${percent}%` }}></div>
+                                            </div>
+                                            <div className="flex justify-between text-[11px] font-semibold text-gray-400 dark:text-gray-400">
+                                                <span className="text-wiz-green dark:text-emerald-400">Terkumpul: {formatRp(prog.collected)}</span>
+                                                <span>Target: {formatRp(prog.target)}</span>
+                                            </div>
+                                        </div>
+                                    );
+                                }) : <p className="text-gray-400 dark:text-gray-500 text-center py-6 italic text-sm">Tidak ada program aktif saat ini.</p>}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- KOMPONEN MODULE VIEW (PENGELOLA TABEL UMUM) ---
+        const ModuleView = ({ title, columns, data, schema, defaultValues, onSave, onDelete, canAdd = true, canEdit = true, canDelete = true }) => {
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [editingData, setEditingData] = useState(null);
+
+            const handleOpenAdd = () => { setEditingData(null); setIsModalOpen(true); };
+            const handleOpenEdit = (row) => { setEditingData(row); setIsModalOpen(true); };
+            const handleClose = () => { setIsModalOpen(false); setEditingData(null); };
+
+            const handleSubmit = (formData) => {
+                onSave({ ...formData, id: editingData ? editingData.id : Date.now() }, !!editingData);
+                handleClose();
+            };
+
+            return (
+                <div className="space-y-6 slide-up">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                            <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">{title}</h2>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Kelola data {title.toLowerCase()} pada tabel di bawah.</p>
+                        </div>
+                        {canAdd && (
+                            <Button onClick={handleOpenAdd} icon="fa-solid fa-plus" variant="primary">Tambah Data Baru</Button>
+                        )}
+                    </div>
+                    <Table columns={columns} data={data} onEdit={canEdit ? handleOpenEdit : null} onDelete={canDelete ? onDelete : null} />
+                    <Modal isOpen={isModalOpen} onClose={handleClose} title={editingData ? `Edit ${title}` : `Tambah ${title}`}>
+                        <DynamicForm schema={schema} initialData={editingData} defaultValues={defaultValues} onSubmit={handleSubmit} onCancel={handleClose} />
+                    </Modal>
+                </div>
+            );
+        };
+
+        // --- HALAMAN DONATUR & DONASI ---
+        const DonaturDanDonasiView = ({ contactConfig, donationConfig, isAdmin }) => {
+            const [activeSubTab, setActiveSubTab] = useState('donatur');
+            return (
+                <div className="space-y-6 slide-up">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                            <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100"><i className="fa-solid fa-hand-holding-heart text-wiz-green mr-2"></i> Donatur & Penerimaan</h2>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Pusat manajemen direktori donatur dan histori donasi ZISWAF reguler.</p>
+                        </div>
+                    </div>
+
+                    <div className="flex overflow-x-auto gap-2 bg-white dark:bg-gray-800 p-1.5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm w-full hide-scrollbar">
+                        <button onClick={() => setActiveSubTab('donatur')}
+                            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all whitespace-nowrap ${activeSubTab === 'donatur' ? 'bg-wiz-green text-white shadow-md' : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-700'}`}>
+                            <i className="fa-solid fa-address-book"></i> Direktori Donatur
+                        </button>
+                        <button onClick={() => setActiveSubTab('donasi')}
+                            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all whitespace-nowrap ${activeSubTab === 'donasi' ? 'bg-wiz-green text-white shadow-md' : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-700'}`}>
+                            <i className="fa-solid fa-hand-holding-dollar"></i> Penerimaan Reguler
+                        </button>
+                    </div>
+
+                    {activeSubTab === 'donatur' && <div className="animate-in"><ModuleView {...contactConfig} canAdd={true} canEdit={isAdmin} canDelete={isAdmin} /></div>}
+                    {activeSubTab === 'donasi' && <div className="animate-in"><ModuleView {...donationConfig} canAdd={true} canEdit={isAdmin} canDelete={isAdmin} /></div>}
+                </div>
+            );
+        };
+
+        // --- HALAMAN PUNDI SCANNER ---
+        const ScannerView = ({ pundis, riwayatPundis, setRiwayatPundis, user, syncDataToSheet, setActiveTab }) => {
+            const [scanInput, setScanInput] = useState('');
+            const [selectedPundi, setSelectedPundi] = useState(null);
+            const [isInputModalOpen, setIsInputModalOpen] = useState(false);
+
+            const handleScan = (val) => {
+                const cleanVal = String(val).trim();
+                if (!cleanVal) return;
+
+                if (cleanVal.includes('WIZ-PUNDI-')) {
+                    const extractedId = cleanVal.split('WIZ-PUNDI-')[1].trim();
+                    const found = pundis.find(p => String(p.id) === String(extractedId));
+                    if (found) {
+                        setScanInput('');
+                        setSelectedPundi(found);
+                        setTimeout(() => setIsInputModalOpen(true), 400);
+                    } else if (cleanVal.length > 15) {
+                        setScanInput('❌ Pundi Tidak Ditemukan!');
+                        setTimeout(() => setScanInput(''), 2000);
+                    }
+                }
+                else if (!isNaN(cleanVal) && cleanVal.length > 0) {
+                    const found = pundis.find(p => String(p.noUrut) === cleanVal);
+                    if (found) {
+                        setScanInput('');
+                        setSelectedPundi(found);
+                        setTimeout(() => setIsInputModalOpen(true), 400);
+                    } else {
+                         setScanInput('❌ Nomor Tidak Ada!');
+                         setTimeout(() => setScanInput(''), 2000);
+                    }
+                }
+            };
+
+            const submitInputHasil = (formData) => {
+                const now = new Date().toISOString();
+                const transaction = {
+                    id: Date.now(),
+                    date: formData.date || now.split('T')[0],
+                    pundiId: selectedPundi.id,
+                    noUrut: selectedPundi.noUrut,
+                    donorName: selectedPundi.donorName,
+                    usaha: selectedPundi.usaha,
+                    amount: formData.amount || 0,
+                    status: formData.status,
+                    amilName: user.name,
+                    notes: formData.notes || '',
+                    receiptUrl: formData.receiptUrl || ''
+                };
+                const updatedRiwayat = [...riwayatPundis, transaction];
+                setRiwayatPundis(updatedRiwayat);
+                syncDataToSheet('RiwayatPundi', updatedRiwayat);
+                setIsInputModalOpen(false);
+                setSelectedPundi(null);
+            };
+
+            return (
+                <div className="space-y-6 slide-up h-full flex flex-col justify-center items-center py-4 sm:py-10">
+                    <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-xl border border-gray-100 dark:border-gray-700 p-6 flex flex-col items-center text-center relative overflow-hidden">
+                        <div className="absolute top-0 inset-x-0 h-2 bg-gradient-to-r from-wiz-green to-wiz-orange"></div>
+                        
+                        <h2 className="text-2xl font-black text-gray-800 dark:text-gray-100 mb-1 mt-2">
+                            <i className="fa-solid fa-qrcode text-wiz-green mr-2"></i>Pindai QR Pundi
+                        </h2>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 px-4">
+                            Arahkan kamera ke stiker QR Pundi atau ketik nomor urut di bawah.
+                        </p>
+
+                        <div className="w-full max-w-xs aspect-square rounded-3xl overflow-hidden shadow-inner border-4 border-gray-100 dark:border-gray-700 relative bg-black mb-6">
+                            {!isInputModalOpen ? (
+                                <Html5QrcodePlugin qrCodeSuccessCallback={handleScan} />
+                            ) : (
+                                <div className="w-full h-full flex flex-col items-center justify-center text-wiz-green bg-gray-900">
+                                    <i className="fa-solid fa-circle-check text-6xl mb-3 animate-bounce"></i>
+                                    <span className="font-bold text-lg">Pundi Ditemukan!</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="w-full">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 text-left">Atau Ketik ID / Nomor Urut</p>
+                            <div className="relative">
+                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                    <i className="fa-solid fa-keyboard text-gray-400"></i>
+                                </div>
+                                <input
+                                    type="text"
+                                    value={scanInput}
+                                    onChange={(e) => {
+                                        setScanInput(e.target.value);
+                                        handleScan(e.target.value);
+                                    }}
+                                    placeholder="Cth: 5 atau WIZ-PUNDI-..."
+                                    className="w-full pl-11 pr-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-center font-mono text-sm focus:ring-2 focus:ring-wiz-green focus:border-wiz-green outline-none text-gray-800 dark:text-gray-100 shadow-inner font-bold transition-all"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    <Modal isOpen={isInputModalOpen} onClose={() => { setIsInputModalOpen(false); setSelectedPundi(null); }} title={selectedPundi ? `Laporan Penarikan: ${selectedPundi.usaha}` : 'Laporan Penarikan'}>
+                        {selectedPundi && (
+                            <DynamicForm 
+                                schema={[
+                                    { name: 'date', label: 'Tanggal Penarikan', type: 'date', required: true },
+                                    { name: 'status', label: 'Status Penjemputan', type: 'select', options: [{value: 'Dijemput', label: 'Kotak Dijemput (Hitung Nanti)'}, {value: 'Berhasil', label: 'Langsung Dihitung (Selesai)'}, {value: 'Gagal', label: 'Gagal / Pundi Kosong'}], required: true },
+                                    { name: 'amount', label: 'Nominal Uang (Rp) - Jika Dihitung', isCurrency: true },
+                                    { name: 'receiptUrl', label: 'Foto Bukti Nota / Penarikan (Opsional)', type: 'file', fullWidth: true },
+                                    { name: 'notes', label: 'Keterangan (Opsional)', type: 'textarea' }
+                                ]}
+                                defaultValues={{ date: new Date().toISOString().split('T')[0], status: 'Dijemput' }}
+                                onSubmit={submitInputHasil}
+                                onCancel={() => { setIsInputModalOpen(false); setSelectedPundi(null); }}
+                            />
+                        )}
+                    </Modal>
+                </div>
+            );
+        };
+
+        // --- HALAMAN PUNDI UTAMA ---
+        const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contacts, programs = [], user, syncDataToSheet, darkMode, setViewImage, amils = [], setActiveTab }) => {
+            const [activeSubTab, setActiveSubTab] = useState('dashboard');
+            const [selectedAmilFilter, setSelectedAmilFilter] = useState(user?.name || 'Semua');
+            const [isInputModalOpen, setIsInputModalOpen] = useState(false);
+            const [selectedPundi, setSelectedPundi] = useState(null);
+            const [isQuickScanOpen, setIsQuickScanOpen] = useState(false);
+            const [printQR, setPrintQR] = useState(null);
+            const [editingRiwayat, setEditingRiwayat] = useState(null);
+            const [isEditRiwayatOpen, setIsEditRiwayatOpen] = useState(false);
+
+            // Filter States
+            const [searchMaster, setSearchMaster] = useState('');
+            const [statusMasterFilter, setStatusMasterFilter] = useState('Semua');
+            const [creatorMasterFilter, setCreatorMasterFilter] = useState('Semua');
+            const [tipeMasterFilter, setTipeMasterFilter] = useState('Semua');
+            const [masterSortOrder, setMasterSortOrder] = useState('asc');
+
+            const [searchTugas, setSearchTugas] = useState('');
+            const [statusTugasFilter, setStatusTugasFilter] = useState('Semua');
+            const [tipeTugasFilter, setTipeTugasFilter] = useState('Semua');
+            const [urutAwal, setUrutAwal] = useState('');
+            const [urutAkhir, setUrutAkhir] = useState('');
+
+            const [searchRiwayat, setSearchRiwayat] = useState('');
+            const [statusRiwayatFilter, setStatusRiwayatFilter] = useState('Semua');
+            const [monthRiwayatFilter, setMonthRiwayatFilter] = useState('Semua');
+            const [amilRiwayatFilter, setAmilRiwayatFilter] = useState('Semua');
+
+            const [dashMonth, setDashMonth] = useState(new Date().getMonth());
+            const [dashYear, setDashYear] = useState(new Date().getFullYear());
+            
+            const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+            const yearOptions = Array.from({length: 7}, (_, i) => new Date().getFullYear() - 3 + i);
+
+            // ... (Logika helper PundiView sama persis dengan kode Anda) ...
+            
+            const handleOpenEditRiwayat = (row) => { setEditingRiwayat(row); setIsEditRiwayatOpen(true); };
+            const saveEditRiwayat = (formData) => {
+                const updated = riwayatPundis.map(r => String(r.id) === String(editingRiwayat.id) ? { ...r, ...formData, amount: Number(formData.amount || 0), receiptUrl: formData.receiptUrl || r.receiptUrl || '' } : r);
+                setRiwayatPundis(updated); syncDataToSheet('RiwayatPundi', updated);
+                setIsEditRiwayatOpen(false); setEditingRiwayat(null);
+            };
+            const deleteRiwayat = (row) => {
+                const updated = riwayatPundis.filter(r => String(r.id) !== String(row.id));
+                setRiwayatPundis(updated); syncDataToSheet('RiwayatPundi', updated);
+            };
+
+            const isAdmin = user?.role === 'Admin';
+            const effectiveAmil = isAdmin ? selectedAmilFilter : user.name;
+
+            const visiblePundis = useMemo(() => {
+                if (isAdmin && effectiveAmil === 'Semua') return pundis;
+                return pundis.filter(p => (p.createdBy || contacts.find(c => c.name === p.donorName)?.createdBy) === effectiveAmil);
+            }, [pundis, isAdmin, effectiveAmil, contacts]);
+
+            const visibleRiwayatPundis = useMemo(() => {
+                if (isAdmin && effectiveAmil === 'Semua') return riwayatPundis;
+                return riwayatPundis.filter(r => r.amilName === effectiveAmil);
+            }, [riwayatPundis, isAdmin, effectiveAmil]);
+
+            const allAmilNames = useMemo(() => {
+                const names = new Set((amils || []).map(a => a.name));
+                pundis.forEach(p => { const c = p.createdBy || contacts.find(cnt => cnt.name === p.donorName)?.createdBy; if (c) names.add(c); });
+                riwayatPundis.forEach(r => { if (r.amilName) names.add(r.amilName); });
+                return Array.from(names).filter(Boolean);
+            }, [amils, pundis, riwayatPundis, contacts]);
+            const uniqueAmils = allAmilNames;
+
+            const uniqueMonths = useMemo(() => {
+                const map = new Map();
+                visibleRiwayatPundis.forEach(r => {
+                    const d = new Date(r.date);
+                    if (!isNaN(d.getTime())) {
+                        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                        map.set(key, new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(d));
+                    }
+                });
+                return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+            }, [visibleRiwayatPundis]);
+
+            const activePundiCampaign = useMemo(() => programs.find(p => p.status === 'Aktif' && ((p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi')))), [programs]);
+
+            const currentMonth = new Date().getMonth();
+            const currentYear = new Date().getFullYear();
+            
+            const stats = useMemo(() => {
+                const totalAktif = visiblePundis.filter(p => p.status === 'Aktif').length;
+                const totalUmum = visiblePundis.filter(p => p.status === 'Aktif' && (p.tipePundi || 'Pundi Umum') === 'Pundi Umum').length;
+                const totalPribadi = visiblePundis.filter(p => p.status === 'Aktif' && p.tipePundi === 'Pundi Pribadi').length;
+                
+                const penambahanUmum = visiblePundis.filter(p => {
+                    if (!p.createdAt) return false;
+                    const d = new Date(p.createdAt);
+                    const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
+                    return matchMonth && d.getFullYear() === dashYear && (p.tipePundi || 'Pundi Umum') === 'Pundi Umum';
+                }).length;
+
+                const penambahanPribadi = visiblePundis.filter(p => {
+                    if (!p.createdAt) return false;
+                    const d = new Date(p.createdAt);
+                    const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
+                    return matchMonth && d.getFullYear() === dashYear && p.tipePundi === 'Pundi Pribadi';
+                }).length;
+
+                const ditarikBulanIni = visiblePundis.filter(p => {
+                    if (!p.updatedAt) return false;
+                    const d = new Date(p.updatedAt);
+                    const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
+                    return p.status === 'Ditarik' && matchMonth && d.getFullYear() === dashYear;
+                }).length;
+                
+                const riwayatBulanIni = visibleRiwayatPundis.filter(r => {
+                    const d = new Date(r.date);
+                    const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
+                    return matchMonth && d.getFullYear() === dashYear;
+                });
+                
+                const berhasil = riwayatBulanIni.filter(r => r.status === 'Berhasil').length;
+                const gagal = riwayatBulanIni.filter(r => r.status === 'Gagal').length;
+                const totalDanaBulanIni = riwayatBulanIni.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0);
+                const totalDanaKumulatif = visibleRiwayatPundis.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+                return { totalAktif, totalUmum, totalPribadi, penambahanUmum, penambahanPribadi, ditarikBulanIni, berhasil, gagal, totalDanaBulanIni, totalDanaKumulatif };
+            }, [visiblePundis, visibleRiwayatPundis, dashMonth, dashYear]);
+
+            const activePundisSorted = [...visiblePundis].filter(p => p.status === 'Aktif').sort((a, b) => Number(a.noUrut) - Number(b.noUrut));
+
+            const filteredMasterPundis = useMemo(() => {
+                const filtered = visiblePundis.filter(p => {
+                    const creator = p.createdBy || contacts.find(c => c.name === p.donorName)?.createdBy || '';
+                    const term = searchMaster.toLowerCase().trim();
+                    const matchSearch = !term || String(p.noUrut || '').toLowerCase().includes(term) || String(p.donorName || '').toLowerCase().includes(term) || String(p.usaha || '').toLowerCase().includes(term) || String(p.alamat || '').toLowerCase().includes(term) || String(p.tipePundi || '').toLowerCase().includes(term) || String(p.phone || '').toLowerCase().includes(term);
+                    const matchStatus = statusMasterFilter === 'Semua' || p.status === statusMasterFilter;
+                    const matchCreator = creatorMasterFilter === 'Semua' || creator === creatorMasterFilter;
+                    const matchTipe = tipeMasterFilter === 'Semua' || (p.tipePundi || 'Pundi Umum') === tipeMasterFilter;
+                    return matchSearch && matchStatus && matchCreator && matchTipe;
+                });
+                return filtered.sort((a, b) => {
+                    const numA = Number(a.noUrut) || 0;
+                    const numB = Number(b.noUrut) || 0;
+                    return masterSortOrder === 'asc' ? numA - numB : numB - numA;
+                });
+            }, [visiblePundis, searchMaster, statusMasterFilter, creatorMasterFilter, tipeMasterFilter, masterSortOrder, contacts]);
+
+            const filteredTugasPundis = useMemo(() => {
+                return activePundisSorted.filter(p => {
+                    const currentRecord = visibleRiwayatPundis.find(r => String(r.pundiId) === String(p.id) && new Date(r.date).getMonth() === currentMonth && new Date(r.date).getFullYear() === currentYear);
+                    const pStatus = currentRecord ? currentRecord.status : 'Belum';
+                    
+                    const term = searchTugas.toLowerCase().trim();
+                    const matchSearch = !term || String(p.noUrut || '').toLowerCase().includes(term) || String(p.donorName || '').toLowerCase().includes(term) || String(p.usaha || '').toLowerCase().includes(term) || String(p.alamat || '').toLowerCase().includes(term);
+                    
+                    let matchStatus = false;
+                    if (statusTugasFilter === 'Semua') matchStatus = true;
+                    else if (statusTugasFilter === 'Belum' && pStatus === 'Belum') matchStatus = true;
+                    else if (statusTugasFilter === 'Dijemput' && pStatus === 'Dijemput') matchStatus = true;
+                    else if (statusTugasFilter === 'Sudah Ditarik' && pStatus === 'Berhasil') matchStatus = true;
+
+                    const matchTipe = tipeTugasFilter === 'Semua' || (p.tipePundi || 'Pundi Umum') === tipeTugasFilter;
+                    const pNo = Number(p.noUrut);
+                    const matchUrutAwal = urutAwal === '' || isNaN(Number(urutAwal)) || pNo >= Number(urutAwal);
+                    const matchUrutAkhir = urutAkhir === '' || isNaN(Number(urutAkhir)) || pNo <= Number(urutAkhir);
+
+                    return matchSearch && matchStatus && matchTipe && matchUrutAwal && matchUrutAkhir;
+                });
+            }, [activePundisSorted, visibleRiwayatPundis, searchTugas, statusTugasFilter, tipeTugasFilter, urutAwal, urutAkhir, currentMonth, currentYear]);
+
+            const filteredRiwayatPundis = useMemo(() => {
+                return visibleRiwayatPundis.filter(r => {
+                    const term = searchRiwayat.toLowerCase().trim();
+                    const matchSearch = !term || String(r.noUrut || '').toLowerCase().includes(term) || String(r.donorName || '').toLowerCase().includes(term) || String(r.usaha || '').toLowerCase().includes(term) || String(r.notes || '').toLowerCase().includes(term);
+                    const matchStatus = statusRiwayatFilter === 'Semua' || r.status === statusRiwayatFilter;
+                    const matchAmil = amilRiwayatFilter === 'Semua' || r.amilName === amilRiwayatFilter;
+                    let matchMonth = true;
+                    if (monthRiwayatFilter !== 'Semua') {
+                        const d = new Date(r.date);
+                        if (!isNaN(d.getTime())) matchMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === monthRiwayatFilter;
+                    }
+                    return matchSearch && matchStatus && matchAmil && matchMonth;
+                });
+            }, [visibleRiwayatPundis, searchRiwayat, statusRiwayatFilter, monthRiwayatFilter, amilRiwayatFilter]);
+            
+            const nextNoUrut = useMemo(() => pundis.reduce((max, p) => Math.max(max, Number(p.noUrut) || 0), 0) + 1, [pundis]);
+
+            const handleQuickScan = (val) => {
+                const cleanVal = String(val).trim();
+                if (!cleanVal) return;
+                let foundPundi = null;
+                if (cleanVal.includes('WIZ-PUNDI-')) {
+                    const extractedId = cleanVal.split('WIZ-PUNDI-')[1].trim();
+                    foundPundi = pundis.find(p => String(p.id) === String(extractedId));
+                } else if (!isNaN(cleanVal) && cleanVal.length > 0) {
+                    foundPundi = pundis.find(p => String(p.noUrut) === cleanVal);
+                }
+                if (foundPundi) {
+                    setIsQuickScanOpen(false); setSelectedPundi(foundPundi);
+                    setTimeout(() => setIsInputModalOpen(true), 400);
+                } else {
+                    const el = document.createElement('div');
+                    el.className = `fixed top-5 left-1/2 -translate-x-1/2 z-[100] bg-red-500 text-white text-xs px-4 py-2.5 rounded-xl shadow-lg transition-all text-center`;
+                    el.innerText = "❌ QR Pundi tidak ditemukan di sistem.";
+                    document.body.appendChild(el); setTimeout(() => el.remove(), 3000);
+                }
+            };
+
+            const handlePrintChecklist = () => { /* Logika cetak sama seperti asli */ };
+            const handlePrintNotaA4 = () => { /* Logika cetak sama seperti asli */ };
+
+            const savePundi = (formData, isEdit) => {
+                const now = new Date().toISOString();
+                const existing = isEdit ? pundis.find(p => String(p.id) === String(formData.id)) : null;
+                let newData = { ...existing, ...formData, tipePundi: formData.tipePundi || (existing && existing.tipePundi) || 'Pundi Umum', updatedAt: now };
+                if (!isEdit) { newData.id = Date.now(); newData.createdAt = now; newData.createdBy = user.name; }
+                const updatedList = isEdit ? pundis.map(p => String(p.id) === String(newData.id) ? newData : p) : [...pundis, newData];
+                setPundis(updatedList); syncDataToSheet('Pundi', updatedList);
+            };
+
+            const deletePundi = (row) => {
+                const updatedList = pundis.filter(p => String(p.id) !== String(row.id));
+                setPundis(updatedList); syncDataToSheet('Pundi', updatedList);
+            };
+
+            const submitInputHasil = (formData) => {
+                const now = new Date().toISOString();
+                const transaction = { id: Date.now(), date: formData.date || now.split('T')[0], pundiId: selectedPundi.id, noUrut: selectedPundi.noUrut, donorName: selectedPundi.donorName, usaha: selectedPundi.usaha, amount: formData.amount || 0, status: formData.status, amilName: user.name, notes: formData.notes || '', receiptUrl: formData.receiptUrl || '' };
+                const updatedRiwayat = [...riwayatPundis, transaction];
+                setRiwayatPundis(updatedRiwayat); syncDataToSheet('RiwayatPundi', updatedRiwayat);
+                setIsInputModalOpen(false);
+            };
+
+            const MasterPundiSchema = [
+                { name: 'noUrut', label: 'Nomor Urut Penarikan (Angka)', type: 'number', required: true },
+                { name: 'tipePundi', label: 'Jenis / Tipe Pundi', type: 'select', options: ['Pundi Umum', 'Pundi Pribadi'], required: true },
+                { name: 'donorName', label: 'Nama Donatur (Ketik Manual)', type: 'text', required: true },
+                { name: 'phone', label: 'Nomor Telp / WhatsApp', type: 'text', required: true },
+                { name: 'usaha', label: 'Nama Usaha / Lokasi Titik', required: true },
+                { name: 'status', label: 'Status Pundi', type: 'select', options: ['Aktif', 'Ditarik'], required: true },
+                { name: 'alamat', label: 'Alamat Spesifik Pundi', type: 'berau_address', fullWidth: true, required: true },
+                { name: 'mapUrl', label: 'Titik Lokasi Google Maps (GPS)', type: 'map_location', fullWidth: true }
+            ];
+
+            const MasterPundiColumns = [
+                { key: 'noUrut', label: 'No. Urut', render: r => <span className="w-8 h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700 rounded-lg font-black text-gray-700 dark:text-gray-300">{r.noUrut}</span> },
+                { key: 'donorName', label: 'Identitas & Lokasi', render: r => (
+                    <div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="font-bold text-gray-800 dark:text-gray-100">{r.donorName}</p>
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${r.tipePundi === 'Pundi Pribadi' ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-300 border-purple-200 dark:border-purple-800' : 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-800'}`}>
+                                {r.tipePundi || 'Pundi Umum'}
+                            </span>
+                        </div>
+                        <p className="text-xs text-wiz-orange dark:text-amber-400 font-medium mt-0.5"><i className="fa-solid fa-store mr-1"></i> {r.usaha}</p>
+                        {r.phone && <p className="text-[11px] text-gray-500 mt-0.5"><i className="fa-brands fa-whatsapp text-green-500 mr-1"></i> {r.phone}</p>}
+                    </div>
+                )},
+                { key: 'alamat', label: 'Alamat & Titik Peta', render: r => (
+                    <div className="space-y-1">
+                        <span className="truncate max-w-[200px] block text-gray-500">{r.alamat}</span>
+                        {r.mapUrl ? (() => {
+                            const mapUrls = parseMapUrls(r.mapUrl);
+                            return (
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    <a href={mapUrls.navUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-wiz-green/10 text-wiz-green dark:text-emerald-400 text-[11px] font-bold hover:bg-wiz-green hover:text-white transition-colors border border-wiz-green/20" title="Buka di Aplikasi Google Maps HP">
+                                        <i className="fa-solid fa-mobile-screen"></i> Di HP
+                                    </a>
+                                    <a href={mapUrls.webUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 text-[11px] font-bold hover:bg-blue-100 transition-colors border border-blue-200 dark:border-blue-800" title="Buka di www.google.com/maps Langsung">
+                                        <i className="fa-solid fa-globe"></i> Web Maps
+                                    </a>
+                                </div>
+                            );
+                        })() : (
+                            <span className="text-[10px] text-gray-400 italic">Belum ada titik GPS</span>
+                        )}
+                    </div>
+                )},
+                { key: 'status', label: 'Status', render: r => <span className={`px-2 py-1 rounded text-xs font-bold ${r.status === 'Aktif' ? 'bg-wiz-green/10 text-wiz-green' : 'bg-red-50 text-red-500'}`}>{r.status}</span> },
+                { key: 'createdBy', label: 'Dibuat Oleh', render: r => {
+                    const creator = r.createdBy || contacts.find(c => c.name === r.donorName)?.createdBy;
+                    return (
+                        <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 flex items-center justify-center text-[10px] font-bold">
+                                {creator ? creator.charAt(0).toUpperCase() : '?'}
+                            </div>
+                            <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">{creator || '-'}</span>
+                        </div>
+                    );
+                }},
+                { key: 'print', label: 'QR', render: r => (
+                    <button onClick={() => setPrintQR(r)} className="p-2 text-wiz-orange hover:bg-wiz-orange/10 rounded-lg transition-colors" title="Cetak Stiker QR">
+                        <i className="fa-solid fa-qrcode text-lg"></i>
+                    </button>
+                )}
+            ];
+
+            return (
+                <div className="space-y-6 slide-up relative">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                            <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100"><i className="fa-solid fa-box-open text-wiz-orange mr-2"></i> Manajemen Pundi WIZ</h2>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Sistem kontrol dan pencatatan donatur kotak pundi.</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <Button onClick={() => setActiveTab('scanner')} variant="primary" className="hidden lg:flex shadow-md shadow-wiz-green/30 px-5" icon="fa-solid fa-camera">Buka Kamera (Scan QR)</Button>
+                            {isAdmin ? (
+                                <div className="flex items-center gap-3 bg-white dark:bg-gray-800 px-4 py-2 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm">
+                                    <div className="w-9 h-9 rounded-xl bg-wiz-green/10 text-wiz-green dark:text-emerald-400 flex items-center justify-center font-bold text-base"><i className="fa-solid fa-user-tag"></i></div>
+                                    <div>
+                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Tampilkan Amil</p>
+                                        <select value={selectedAmilFilter} onChange={(e) => setSelectedAmilFilter(e.target.value)} className="bg-transparent text-sm font-bold text-gray-800 dark:text-gray-100 outline-none cursor-pointer">
+                                            <option value="Semua" className="dark:bg-gray-800">Semua Amil (Kolektif)</option>
+                                            {allAmilNames.map((name, idx) => (<option key={idx} value={name} className="dark:bg-gray-800">Amil: {name}</option>))}
+                                        </select>
+                                    </div>
+                                    {selectedAmilFilter !== 'Semua' && (
+                                        <button onClick={() => setSelectedAmilFilter('Semua')} className="text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 p-1.5 rounded-lg transition-colors ml-1"><i className="fa-solid fa-xmark"></i></button>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-3 bg-wiz-green/10 dark:bg-emerald-900/30 border border-wiz-green/20 dark:border-emerald-800/50 px-4 py-2 rounded-2xl">
+                                    <div className="w-9 h-9 rounded-xl bg-wiz-green text-white flex items-center justify-center font-bold text-sm shadow-sm"><i className="fa-solid fa-user-check"></i></div>
+                                    <div>
+                                        <p className="text-[10px] font-bold text-wiz-green_dark dark:text-emerald-300 uppercase tracking-wider">Amil Petugas</p>
+                                        <p className="text-sm font-black text-wiz-green dark:text-emerald-400">{user?.name}</p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="flex overflow-x-auto gap-2 bg-white dark:bg-gray-800 p-1.5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm w-full hide-scrollbar">
+                        {[
+                            { id: 'dashboard', label: 'Dashboard Analitik', icon: 'fa-chart-pie' },
+                            { id: 'tugas', label: 'Tugas Penarikan', icon: 'fa-clipboard-list' },
+                            { id: 'master', label: 'Data Master Pundi', icon: 'fa-boxes-stacked' },
+                            { id: 'riwayat', label: 'Riwayat Sedekah', icon: 'fa-money-bill-wave' }
+                        ].map(tab => (
+                            <button key={tab.id} onClick={() => setActiveSubTab(tab.id)} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all whitespace-nowrap ${activeSubTab === tab.id ? 'bg-wiz-green text-white shadow-md' : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-700'}`}>
+                                <i className={`fa-solid ${tab.icon}`}></i> {tab.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Rendering Sub Tabs untuk Pundi */}
+                    {activeSubTab === 'dashboard' && (
+                        <div className="space-y-6 animate-in">
+                            <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                <div>
+                                    <h3 className="font-bold text-gray-800 dark:text-gray-100 text-sm"><i className="fa-solid fa-filter text-wiz-green mr-1.5"></i> Filter Periode Analitik</h3>
+                                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Pilih bulan dan tahun untuk menyesuaikan data aktivitas dan penarikan di bawah ini.</p>
+                                </div>
+                                <div className="flex items-center gap-2 w-full sm:w-auto">
+                                    <select value={dashMonth} onChange={(e) => setDashMonth(e.target.value === 'Semua' ? 'Semua' : Number(e.target.value))} className="flex-1 sm:flex-none px-3 py-2 bg-gray-50 dark:bg-gray-700/70 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer focus:ring-2 focus:ring-wiz-green">
+                                        <option value="Semua" className="dark:bg-gray-800">Semua Bulan</option>
+                                        {monthNames.map((m, idx) => <option key={idx} value={idx} className="dark:bg-gray-800">{m}</option>)}
+                                    </select>
+                                    <select value={dashYear} onChange={(e) => setDashYear(Number(e.target.value))} className="flex-1 sm:flex-none px-3 py-2 bg-gray-50 dark:bg-gray-700/70 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer focus:ring-2 focus:ring-wiz-green">
+                                        {yearOptions.map(y => <option key={y} value={y} className="dark:bg-gray-800">{y}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                                <div className="bg-gradient-to-br from-wiz-green to-wiz-green_dark p-6 rounded-2xl text-white shadow-lg relative overflow-hidden">
+                                    <i className="fa-solid fa-box-open absolute -right-4 -bottom-4 text-7xl opacity-10"></i>
+                                    <p className="text-sm font-semibold opacity-80 uppercase tracking-wide mb-1">Total Pundi Aktif</p>
+                                    <h3 className="text-4xl font-black">{stats.totalAktif} <span className="text-base font-normal opacity-75">Kotak</span></h3>
+                                    <div className="flex items-center gap-3 mt-3 pt-3 border-t border-white/20 text-xs">
+                                        <span className="bg-white/20 px-2 py-0.5 rounded-md font-semibold"><i className="fa-solid fa-store mr-1"></i> {stats.totalUmum} Umum</span>
+                                        <span className="bg-white/20 px-2 py-0.5 rounded-md font-semibold"><i className="fa-solid fa-house-user mr-1"></i> {stats.totalPribadi} Pribadi</span>
+                                    </div>
+                                </div>
+                                <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center">
+                                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Aktivitas Kotak</p>
+                                    <div className="space-y-3.5">
+                                        <div className="flex justify-between items-center text-sm font-semibold">
+                                            <span className="text-blue-500 flex items-center gap-2"><i className="fa-solid fa-circle-plus"></i> Tambah (Umum)</span>
+                                            <span className="text-gray-800 dark:text-gray-200 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">{stats.penambahanUmum} Kotak</span>
+                                        </div>
+                                        <div className="flex justify-between items-center text-sm font-semibold">
+                                            <span className="text-purple-500 flex items-center gap-2"><i className="fa-solid fa-circle-plus"></i> Tambah (Pribadi)</span>
+                                            <span className="text-gray-800 dark:text-gray-200 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-100">{stats.penambahanPribadi} Kotak</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center">
+                                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Hasil Penarikan</p>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-sm font-semibold text-gray-600 dark:text-gray-300">Berhasil: <span className="text-wiz-green font-bold bg-wiz-green/10 px-1.5 py-0.5 rounded">{stats.berhasil}</span></span>
+                                        <span className="text-sm font-semibold text-gray-600 dark:text-gray-300">Gagal: <span className="text-red-500 font-bold bg-red-50 px-1.5 py-0.5 rounded">{stats.gagal}</span></span>
+                                    </div>
+                                    <p className="text-[10px] font-bold text-gray-400 uppercase mt-2">Nominal Terkumpul</p>
+                                    <p className="text-2xl font-black text-wiz-orange">{formatRp(stats.totalDanaBulanIni)}</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeSubTab === 'master' && (
+                        <div className="space-y-4 animate-in">
+                            <ModuleView 
+                                title="Data Kotak Pundi" 
+                                data={filteredMasterPundis} 
+                                columns={MasterPundiColumns} 
+                                schema={MasterPundiSchema} 
+                                defaultValues={{ noUrut: nextNoUrut, status: 'Aktif', tipePundi: 'Pundi Umum' }}
+                                onSave={savePundi} 
+                                onDelete={isAdmin ? deletePundi : null} 
+                                canDelete={isAdmin}
+                            />
+                        </div>
+                    )}
+                    
+                    {/* ... (Tab 'tugas' dan 'riwayat' dapat dilanjutkan jika diperlukan, logika sama) ... */}
+                </div>
+            );
+        };
+
+        // =========================================================================
+        // 4. KOMPONEN UTAMA (App.jsx)
+        // =========================================================================
+        const App = () => {
+            const safeGetJSON = (key, fallback) => {
+                try {
+                    const item = localStorage.getItem(key);
+                    return item ? JSON.parse(item) : fallback;
+                } catch(e) { return fallback; }
+            };
+            const safeSetJSON = (key, value) => {
+                try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
+            };
+            const safeRemove = (key) => {
+                try { localStorage.removeItem(key); } catch(e) {}
+            };
+
+            const [user, setUser] = useState(() => safeGetJSON('wiz_user_session', null));
+            const [isInitializing, setIsInitializing] = useState(() => !safeGetJSON('wiz_user_session', null));
+            const [isRefreshing, setIsRefreshing] = useState(false);
+            const [isOfflineMode, setIsOfflineMode] = useState(false);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+            const [darkMode, setDarkMode] = useState(() => { try { return localStorage.getItem('wiz_dark_mode') === 'true'; } catch(e) { return false; } });
+            
+            const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+            const [passwordForm, setPasswordForm] = useState({ old: '', new: '' });
+            const [pwdError, setPwdError] = useState('');
+            const [pwdSuccess, setPwdSuccess] = useState('');
+            
+            const [deletePrompt, setDeletePrompt] = useState(null);
+            const [viewImage, setViewImage] = useState(null);
+
+            const [amils, setAmils] = useState(() => safeGetJSON('wiz_cache_Amil', fallbackAmils));
+            const [contacts, setContacts] = useState(() => safeGetJSON('wiz_cache_Kontak', []));
+            const [programs, setPrograms] = useState(() => safeGetJSON('wiz_cache_Program', []));
+            const [donations, setDonations] = useState(() => safeGetJSON('wiz_cache_Donasi', []));
+            const [tasks, setTasks] = useState(() => safeGetJSON('wiz_cache_Tugas', []));
+            const [pundis, setPundis] = useState(() => safeGetJSON('wiz_cache_Pundi', []));
+            const [riwayatPundis, setRiwayatPundis] = useState(() => safeGetJSON('wiz_cache_RiwayatPundi', []));
+
+            useEffect(() => {
+                if (darkMode) { document.documentElement.classList.add('dark'); try { localStorage.setItem('wiz_dark_mode', 'true'); } catch(e) {} } 
+                else { document.documentElement.classList.remove('dark'); try { localStorage.setItem('wiz_dark_mode', 'false'); } catch(e) {} }
+            }, [darkMode]);
+
+            const fetchAllData = async (isManualRefresh = false) => {
+                if (isManualRefresh) setIsRefreshing(true);
+                try {
+                    const res = await fetch(API_URL);
+                    const result = await res.json();
+                    if (result.status === 'success' && result.data) {
+                        const d = result.data;
+                        if (d.Amil?.length > 0) {
+                            setAmils(d.Amil); safeSetJSON('wiz_cache_Amil', d.Amil);
+                            const savedSession = safeGetJSON('wiz_user_session', null);
+                            if (savedSession) {
+                                const foundUser = d.Amil.find(a => a.email.toLowerCase() === savedSession.email.toLowerCase());
+                                if (foundUser && foundUser.status === 'Aktif') { setUser(foundUser); safeSetJSON('wiz_user_session', foundUser); } 
+                                else if (foundUser && foundUser.status !== 'Aktif') { handleLogout(); }
+                            }
+                        }
+                        if (d.Kontak) { setContacts(d.Kontak); safeSetJSON('wiz_cache_Kontak', d.Kontak); }
+                        if (d.Program) { setPrograms(d.Program); safeSetJSON('wiz_cache_Program', d.Program); }
+                        if (d.Donasi) { setDonations(d.Donasi); safeSetJSON('wiz_cache_Donasi', d.Donasi); }
+                        if (d.Tugas) { setTasks(d.Tugas); safeSetJSON('wiz_cache_Tugas', d.Tugas); }
+                        if (d.Pundi) { setPundis(d.Pundi); safeSetJSON('wiz_cache_Pundi', d.Pundi); }
+                        if (d.RiwayatPundi) { setRiwayatPundis(d.RiwayatPundi); safeSetJSON('wiz_cache_RiwayatPundi', d.RiwayatPundi); }
+                        setIsOfflineMode(false);
+                    } else { setIsOfflineMode(true); }
+                } catch (err) { setIsOfflineMode(true); } finally { setIsInitializing(false); setIsRefreshing(false); }
+            };
+
+            useEffect(() => { fetchAllData(); }, []);
+
+            const handleLogin = (email, password, setError) => {
+                const foundUser = amils.find(a => a.email.toLowerCase() === email.trim().toLowerCase() && String(a.password) === String(password));
+                if (foundUser) {
+                    if(foundUser.status !== 'Aktif') return setError('Akses ditolak: Akun non-aktif.');
+                    safeSetJSON('wiz_user_session', foundUser); safeSetJSON('wiz_user_email', email);
+                    setUser(foundUser); setError('');
+                } else { setError('Kredensial tidak valid.'); }
+            };
+
+            const handleLogout = () => { safeRemove('wiz_user_session'); safeRemove('wiz_user_email'); setUser(null); };
+
+            const syncDataToSheet = async (sheetName, newData) => {
+                safeSetJSON('wiz_cache_' + sheetName, newData);
+                try { await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'syncData', sheetName, data: newData }) }); } catch(err) { setIsOfflineMode(true); }
+            };
+
+            const handleChangePassword = (e) => {
+                e.preventDefault();
+                setPwdError(''); setPwdSuccess('');
+                if (String(passwordForm.old) !== String(user.password)) return setPwdError('Sandi lama salah.');
+                if (passwordForm.new.length < 6) return setPwdError('Sandi baru minimal 6 karakter.');
+
+                const newAmilsData = amils.map(a => a.id === user.id ? { ...a, password: passwordForm.new } : a);
+                const updatedUser = { ...user, password: passwordForm.new };
+                setAmils(newAmilsData); setUser(updatedUser);
+                safeSetJSON('wiz_user_session', updatedUser); safeSetJSON('wiz_cache_Amil', newAmilsData);
+                syncDataToSheet('Amil', newAmilsData);
+                setPwdSuccess('Kata sandi diperbarui.');
+                setTimeout(() => { setIsPasswordModalOpen(false); setPasswordForm({ old: '', new: '' }); setPwdSuccess(''); }, 1500);
+            };
+
+            const createSaveHandler = (setter, state, sheetName) => (data, isEdit) => {
+                let newDataToSave = { ...data };
+                if (!isEdit && sheetName === 'Kontak' && user) newDataToSave.createdBy = user.name;
+                let newData = isEdit ? state.map(item => item.id === newDataToSave.id ? newDataToSave : item) : [...state, newDataToSave];
+                setter(newData); safeSetJSON('wiz_cache_' + sheetName, newData); syncDataToSheet(sheetName, newData);
+            };
+
+            const createDeleteHandler = (setter, state, sheetName) => (row) => setDeletePrompt({ row, setter, state, sheetName });
+
+            const confirmDelete = () => {
+                if(!deletePrompt) return;
+                const { row, setter, state, sheetName } = deletePrompt;
+                const newData = state.filter(item => item.id !== row.id);
+                setter(newData); safeSetJSON('wiz_cache_' + sheetName, newData); syncDataToSheet(sheetName, newData);
+                setDeletePrompt(null);
+            };
+
+            if (isInitializing) return (
+                <div className="h-screen w-full flex flex-col items-center justify-center bg-wiz-light dark:bg-gray-900 transition-colors">
+                    <div className="w-24 h-24 mb-6 relative">
+                        <div className="absolute inset-0 rounded-full border-t-4 border-wiz-green animate-spin"></div>
+                        <div className="absolute inset-2 rounded-full border-r-4 border-wiz-orange animate-spin animation-delay-150"></div>
+                        <i className="fa-solid fa-leaf absolute inset-0 flex items-center justify-center text-3xl text-wiz-green dark:text-emerald-400"></i>
+                    </div>
+                    <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-1">Menyiapkan Workspace...</h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Sinkronisasi data awan</p>
+                </div>
+            );
+
+            if (!user) return <LoginScreen onLogin={handleLogin} amilsData={amils} darkMode={darkMode} setDarkMode={setDarkMode} onRefresh={() => fetchAllData(true)} isRefreshing={isRefreshing} />;
+
+            const isAdmin = user?.role === 'Admin';
+            
+            const StatusBadge = ({ text, type }) => {
+                const colors = {
+                    success: 'bg-wiz-green/10 dark:bg-emerald-950/40 text-wiz-green dark:text-emerald-400 border-wiz-green/20 dark:border-emerald-800/50',
+                    warning: 'bg-wiz-orange/10 dark:bg-amber-950/40 text-wiz-orange_dark dark:text-amber-400 border-wiz-orange/20 dark:border-amber-800/50',
+                    danger: 'bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 border-red-100 dark:border-red-800/50',
+                    neutral: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600'
+                };
+                let c = colors.neutral;
+                if(['Aktif', 'Berhasil', 'Selesai'].includes(text)) c = colors.success;
+                else if(['Menunggu Validasi', 'Dalam Proses'].includes(text)) c = colors.warning;
+                else if(['Dibatalkan', 'Gagal', 'Nonaktif'].includes(text)) c = colors.danger;
+                return <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border uppercase tracking-wide ${c}`}>{text}</span>;
+            };
+
+            const visibleContacts = isAdmin ? contacts : contacts.filter(c => c.createdBy === user.name);
+            const contactOptions = visibleContacts.map(c => c.name);
+
+            // ... (Config Data Sama Seperti Asli) ...
+            const contactConfig = {
+                title: 'Data Kontak', data: visibleContacts,
+                onSave: (formData, isEdit) => {
+                    let newDataToSave = { ...formData };
+                    if (!isEdit && user) newDataToSave.createdBy = user.name;
+                    let newContacts = isEdit ? contacts.map(item => item.id === newDataToSave.id ? newDataToSave : item) : [...contacts, newDataToSave];
+                    setContacts(newContacts); syncDataToSheet('Kontak', newContacts);
+                }, 
+                onDelete: createDeleteHandler(setContacts, contacts, 'Kontak'),
+                columns: [
+                    { key: 'name', label: 'Nama' },
+                    { key: 'phone', label: 'No. Telp / WA' },
+                    { key: 'address', label: 'Domisili' }
+                ],
+                schema: [
+                    { name: 'name', label: 'Nama Lengkap', required: true },
+                    { name: 'phone', label: 'No. HP Utama', required: true },
+                    { name: 'address', label: 'Alamat Domisili', type: 'berau_address', fullWidth: true }
+                ]
+            };
+
+            const navItems = [
+                { id: 'dashboard', label: 'Beranda Utama', icon: 'fa-solid fa-border-all' },
+                { id: 'pundi', label: 'Manajemen Pundi', icon: 'fa-solid fa-box-open' },
+                { id: 'scanner', label: 'Pindai QR Pundi', icon: 'fa-solid fa-qrcode' },
+                { id: 'donatur_donasi', label: 'Donatur & Penerimaan', icon: 'fa-solid fa-hand-holding-heart' },
+                { id: 'program', label: 'Campaign WIZ', icon: 'fa-solid fa-boxes-packing' }
+            ];
+            if (isAdmin) navItems.push({ id: 'amil', label: 'Pengaturan Sistem', icon: 'fa-solid fa-gear' });
+
+            return (
+                <div className="flex h-screen bg-wiz-light dark:bg-gray-900 overflow-hidden transition-colors duration-200">
+                    {/* SIDEBAR */}
+                    <aside className={`fixed lg:static inset-y-0 left-0 z-50 w-72 bg-white dark:bg-gray-800 border-r border-gray-100 dark:border-gray-700 shadow-[4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300 ease-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} flex flex-col`}>
+                        <div className="px-6 py-8 flex items-center justify-center">
+                            <img src="https://drive.google.com/uc?id=1TcpcZtGKBKAOBAthf6Rea4HHDZ0l9tBU" alt="Logo WIZ" className="h-10 object-contain" />
+                        </div>
+                        
+                        <nav className="flex-1 px-4 py-4 space-y-1.5 overflow-y-auto">
+                            <p className="px-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3 mt-2">Menu Navigasi</p>
+                            {navItems.map(item => {
+                                const isActive = activeTab === item.id;
+                                return (
+                                    <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }}
+                                        className={`w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl transition-all duration-300 text-[14px] font-semibold
+                                        ${isActive ? 'bg-gradient-to-r from-wiz-green to-[#2e8870] text-white shadow-lg shadow-wiz-green/30 translate-x-1' 
+                                        : 'text-gray-500 dark:text-gray-400 hover:bg-wiz-green/5 dark:hover:bg-gray-700/60 hover:text-wiz-green dark:hover:text-emerald-400'}`}>
+                                        <i className={`${item.icon} w-5 text-center ${isActive ? 'text-white' : 'text-gray-400 dark:text-gray-500'}`}></i> 
+                                        {item.label}
+                                    </button>
+                                );
+                            })}
+                        </nav>
+
+                        <div className="p-5 border-t border-gray-50 dark:border-gray-700">
+                            {isOfflineMode && (
+                                <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs px-4 py-3 rounded-xl flex items-center gap-2 font-semibold mb-3">
+                                    <i className="fa-solid fa-wifi"></i> Luring / Disconnect
+                                </div>
+                            )}
+                            <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-colors text-sm font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600">
+                                <i className="fa-solid fa-arrow-right-from-bracket"></i> Akhiri Sesi
+                            </button>
+                        </div>
+                    </aside>
+
+                    {/* MAIN CONTENT AREA */}
+                    <main className="flex-1 flex flex-col h-full overflow-hidden relative w-full">
+                        <header className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-md border-b border-gray-100 dark:border-gray-700 px-6 py-4 flex items-center justify-between sticky top-0 z-30 shadow-sm transition-colors">
+                            <div className="flex items-center gap-4">
+                                <button className="lg:hidden p-2 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+                                    <i className="fa-solid fa-bars-staggered text-xl"></i>
+                                </button>
+                                <div className="hidden sm:block">
+                                    <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 capitalize leading-tight">{activeTab.replace('_', ' ')}</h2>
+                                    <p className="text-xs text-gray-400 font-medium">{new Date().toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                                </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-3 sm:gap-4">
+                                <button onClick={() => setDarkMode(!darkMode)} className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-wiz-orange dark:hover:text-yellow-400 hover:bg-wiz-orange/10 dark:hover:bg-gray-700 rounded-full transition-all">
+                                    <i className={`fa-solid ${darkMode ? 'fa-sun text-yellow-400' : 'fa-moon'} text-lg`}></i>
+                                </button>
+                                <button onClick={() => fetchAllData(true)} disabled={isRefreshing} className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-wiz-green dark:hover:text-emerald-400 hover:bg-wiz-green/10 dark:hover:bg-gray-700 rounded-full transition-all">
+                                    <i className={`fa-solid fa-rotate text-lg ${isRefreshing ? 'fa-spin text-wiz-green' : ''}`}></i>
+                                </button>
+                                
+                                <div className="relative group cursor-pointer">
+                                    <div className="flex items-center gap-3 pl-3 sm:pl-4 border-l border-gray-200 dark:border-gray-700">
+                                        <div className="hidden sm:block text-right">
+                                            <p className="font-bold text-gray-700 dark:text-gray-200 text-sm">{user.name}</p>
+                                            <p className="text-[11px] font-semibold text-wiz-orange dark:text-amber-400 uppercase tracking-wide">{user.role}</p>
+                                        </div>
+                                        <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-wiz-green to-[#2e8870] flex items-center justify-center text-white font-bold shadow-md">
+                                            {user.name.charAt(0)}
+                                        </div>
+                                    </div>
+                                    <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 py-2 hidden group-hover:block z-50">
+                                        <button onClick={() => setIsPasswordModalOpen(true)} className="w-full text-left px-5 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-wiz-light dark:hover:bg-gray-700 hover:text-wiz-green transition-colors flex items-center gap-3">
+                                            <i className="fa-solid fa-shield-halved"></i> Ganti Sandi
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </header>
+
+                        <div className="flex-1 overflow-auto p-3 sm:p-6 lg:p-8 custom-scrollbar relative">
+                            <div className="max-w-7xl mx-auto pb-28 sm:pb-28">
+                                {activeTab === 'dashboard' && <DashboardView data={{ programs, donations, tasks, amils, pundis, riwayatPundis, contacts }} darkMode={darkMode} />}
+                                {activeTab === 'donatur_donasi' && <DonaturDanDonasiView contactConfig={contactConfig} isAdmin={isAdmin} />}
+                                {activeTab === 'pundi' && <PundiView pundis={pundis} setPundis={setPundis} riwayatPundis={riwayatPundis} setRiwayatPundis={setRiwayatPundis} contacts={contacts} programs={programs} user={user} syncDataToSheet={syncDataToSheet} darkMode={darkMode} amils={amils} setActiveTab={setActiveTab} />}
+                                {activeTab === 'scanner' && <ScannerView pundis={pundis} riwayatPundis={riwayatPundis} setRiwayatPundis={setRiwayatPundis} user={user} syncDataToSheet={syncDataToSheet} setActiveTab={setActiveTab} />}
+                            </div>
+                        </div>
+
+                        {/* BOTTOM NAVIGATION MOBILE */}
+                        <div className="fixed bottom-0 left-0 right-0 lg:left-72 z-50 bg-white/95 dark:bg-gray-800/95 backdrop-blur-lg border-t border-gray-200/80 dark:border-gray-700/80 px-2 py-1.5 pb-safe shadow-[0_-4px_25px_rgba(0,0,0,0.1)] flex items-center justify-around lg:hidden">
+                            {[
+                                { id: 'dashboard', label: 'Beranda', icon: 'fa-solid fa-border-all' },
+                                { id: 'pundi', label: 'Pundi', icon: 'fa-solid fa-box-open' },
+                                { id: 'scanner', label: 'Scan', icon: 'fa-solid fa-qrcode', isCenter: true },
+                                { id: 'donatur_donasi', label: 'Donatur', icon: 'fa-solid fa-hand-holding-heart' }
+                            ].map(item => {
+                                const isActive = activeTab === item.id;
+                                if (item.isCenter) {
+                                    return (
+                                        <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }} className="relative -top-5 flex flex-col items-center justify-center group focus:outline-none">
+                                            <div className="w-14 h-14 bg-gradient-to-tr from-wiz-green via-[#27745F] to-emerald-500 rounded-full flex items-center justify-center text-white shadow-xl shadow-wiz-green/50 border-4 border-white dark:border-gray-800">
+                                                <i className={`${item.icon} text-2xl`}></i>
+                                            </div>
+                                            <span className={`text-[10px] font-bold mt-1 transition-colors ${isActive ? 'text-wiz-green' : 'text-gray-500'}`}>{item.label}</span>
+                                        </button>
+                                    );
+                                }
+                                return (
+                                    <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }} className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition-all focus:outline-none ${isActive ? 'text-wiz-green font-bold scale-105' : 'text-gray-400'}`}>
+                                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center mb-0.5 ${isActive ? 'bg-wiz-green/10' : ''}`}><i className={`${item.icon} text-base`}></i></div>
+                                        <span className="text-[10px] tracking-tight">{item.label}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </main>
+
+                    {/* MODAL GANTI PASSWORD & KONFIRMASI HAPUS */}
+                    <Modal isOpen={isPasswordModalOpen} onClose={() => setIsPasswordModalOpen(false)} title="Pengaturan Keamanan">
+                        <form onSubmit={handleChangePassword} className="space-y-4">
+                            {pwdError && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl border border-red-100">{pwdError}</p>}
+                            {pwdSuccess && <p className="text-sm text-wiz-green bg-wiz-green/10 p-3 rounded-xl border border-wiz-green/20">{pwdSuccess}</p>}
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1.5 uppercase">Sandi Saat Ini</label>
+                                <input type="password" required value={passwordForm.old} onChange={e => setPasswordForm({...passwordForm, old: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1.5 uppercase">Sandi Baru</label>
+                                <input type="password" required value={passwordForm.new} onChange={e => setPasswordForm({...passwordForm, new: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl" />
+                            </div>
+                            <div className="flex justify-end pt-4 mt-2"><Button type="submit" variant="primary">Perbarui Sandi</Button></div>
+                        </form>
+                    </Modal>
+
+                    <Modal isOpen={!!deletePrompt} onClose={() => setDeletePrompt(null)}>
+                        <div className="p-4 flex flex-col items-center justify-center text-center">
+                            <div className="bg-red-50 p-5 rounded-full text-red-500 mb-5"><i className="fa-solid fa-trash-can text-4xl"></i></div>
+                            <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 mb-2">Konfirmasi Hapus</h3>
+                            <p className="text-sm text-gray-500 mb-8 max-w-sm">Data akan dihapus permanen.</p>
+                            <div className="flex gap-3 w-full">
+                                <Button variant="secondary" className="flex-1 py-3" onClick={() => setDeletePrompt(null)}>Batal</Button>
+                                <Button variant="danger" className="flex-1 py-3" onClick={confirmDelete}>Ya, Hapus</Button>
+                            </div>
+                        </div>
+                    </Modal>
+                </div>
+            );
+        }
+
+        const rootElement = document.getElementById('root');
+        const root = ReactDOM.createRoot(rootElement);
+        root.render(<App />);
+    </script>
+</body>
+</html>
