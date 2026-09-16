@@ -516,9 +516,19 @@ const App = () => {
                                     <p className="font-bold text-gray-700 dark:text-gray-200 text-sm">{user.name}</p>
                                     <p className="text-[11px] font-semibold text-wiz-orange dark:text-amber-400 uppercase tracking-wide">{user.role}</p>
                                 </div>
-                                <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-wiz-green to-[#2e8870] flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-gray-700">
-                                    {user.name.charAt(0)}
-                                </div>
+                                <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-wiz-green to-[#2e8870] flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-gray-700 overflow-hidden">
+    {user.photoUrl ? (
+        <img 
+            src={getDirectImageUrl(user.photoUrl)} 
+            alt={user.name} 
+            className="w-full h-full object-cover" 
+            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }}
+        />
+    ) : null}
+    <span style={{ display: user.photoUrl ? 'none' : 'block' }}>
+        {user.name?.charAt(0) || 'A'}
+    </span>
+</div>
                             </div>
                             <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 py-2 hidden group-hover:block z-50 transform origin-top-right transition-all">
                                 <div className="px-4 py-2 border-b border-gray-50 dark:border-gray-700 mb-1 sm:hidden">
