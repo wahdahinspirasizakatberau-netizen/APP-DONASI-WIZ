@@ -382,23 +382,48 @@ const App = () => {
         ]
     };
 
-    const amilConfig = {
-        title: 'Akses Sistem', data: amils,
-        onSave: createSaveHandler(setAmils, amils, 'Amil'), onDelete: createDeleteHandler(setAmils, amils, 'Amil'),
-        columns: [
-            { key: 'name', label: 'Nama Pengguna' },
-            { key: 'email', label: 'Kredensial' },
-            { key: 'role', label: 'Hak Akses', render: r => <span className={`font-bold ${r.role === 'Admin' ? 'text-wiz-orange dark:text-amber-400' : 'text-wiz-green dark:text-emerald-400'}`}>{r.role}</span> },
-            { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> }
-        ],
-        schema: [
-            { name: 'name', label: 'Nama Lengkap', required: true },
-            { name: 'email', label: 'Email Akses', type: 'email', required: true },
-            { name: 'password', label: 'Kata Sandi', required: true },
-            { name: 'role', label: 'Hak Akses', type: 'select', options: ['Admin', 'Amil'], required: true },
-            { name: 'status', label: 'Status Akun', type: 'select', options: ['Aktif', 'Nonaktif'], required: true }
-        ]
-    };
+    // Konfigurasi Menu Pengaturan Sistem dengan Foto Profil Amil
+            const amilConfig = {
+                title: 'Akses Sistem',
+                data: amils,
+                onSave: createSaveHandler(setAmils, amils, 'Amil'),
+                onDelete: createDeleteHandler(setAmils, amils, 'Amil'),
+                columns: [
+                    { 
+                        key: 'photoUrl', 
+                        label: 'Foto Profil', 
+                        render: r => {
+                            const direct = getDirectImageUrl(r.photoUrl);
+                            return (
+                                <div className="w-11 h-11 rounded-full overflow-hidden bg-wiz-green/10 text-wiz-green dark:text-emerald-400 flex items-center justify-center font-bold text-sm border-2 border-white dark:border-gray-700 shadow-sm">
+                                    {direct ? (
+                                        <img 
+                                            src={direct} 
+                                            alt={r.name} 
+                                            className="w-full h-full object-cover cursor-pointer" 
+                                            onClick={() => setViewImage ? setViewImage({ direct: direct, original: r.photoUrl }) : window.open(direct, '_blank')} 
+                                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} 
+                                        />
+                                    ) : null}
+                                    <span style={{ display: direct ? 'none' : 'block' }}>{r.name?.charAt(0) || 'A'}</span>
+                                </div>
+                            );
+                        }
+                    },
+                    { key: 'name', label: 'Nama Pengguna' },
+                    { key: 'email', label: 'Kredensial' },
+                    { key: 'role', label: 'Hak Akses', render: r => <span className={`font-bold ${r.role === 'Admin' ? 'text-wiz-orange dark:text-amber-400' : 'text-wiz-green dark:text-emerald-400'}`}>{r.role}</span> },
+                    { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> }
+                ],
+                schema: [
+                    { name: 'photoUrl', label: 'Foto Profil Amil (Upload ke Cloud)', type: 'file', fullWidth: true },
+                    { name: 'name', label: 'Nama Lengkap', required: true },
+                    { name: 'email', label: 'Email Akses', type: 'email', required: true },
+                    { name: 'password', label: 'Kata Sandi', required: true },
+                    { name: 'role', label: 'Hak Akses', type: 'select', options: ['Admin', 'Amil'], required: true },
+                    { name: 'status', label: 'Status Akun', type: 'select', options: ['Aktif', 'Nonaktif'], required: true }
+                ]
+            };
 
     const navItems = [
         { id: 'dashboard', label: 'Beranda Utama', icon: 'fa-solid fa-border-all' },
