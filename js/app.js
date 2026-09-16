@@ -75,7 +75,7 @@ const App = () => {
                     
                     const savedSession = safeGetJSON('wiz_user_session', null);
                     if (savedSession) {
-                        const foundUser = d.Amil.find(a => a.email.toLowerCase() === savedSession.email.toLowerCase());
+                        const foundUser = d.Amil.find(a => String(a.email).toLowerCase() === String(savedSession.email).toLowerCase());
                         if (foundUser && foundUser.status === 'Aktif') {
                             setUser(foundUser);
                             safeSetJSON('wiz_user_session', foundUser);
@@ -104,29 +104,27 @@ const App = () => {
     useEffect(() => { fetchAllData(); }, []);
 
     const handleLogin = (email, password, setError) => {
-                const cleanEmail = String(email || '').trim().toLowerCase();
-                const cleanPassword = String(password || '').trim();
+        const cleanEmail = String(email || '').trim().toLowerCase();
+        const cleanPassword = String(password || '').trim();
 
-                // Cari akun dengan mencocokkan email dan password yang sudah dibersihkan dari spasi liar
-                const foundUser = amils.find(a => {
-                    const amilEmail = String(a.email || '').trim().toLowerCase();
-                    const amilPass = String(a.password || '').trim();
-                    return amilEmail === cleanEmail && amilPass === cleanPassword;
-                });
+        const foundUser = amils.find(a => {
+            const amilEmail = String(a.email || '').trim().toLowerCase();
+            const amilPass = String(a.password || '').trim();
+            return amilEmail === cleanEmail && amilPass === cleanPassword;
+        });
 
-                if (foundUser) {
-                    if (String(foundUser.status || '').trim().toLowerCase() !== 'aktif') {
-                        return setError('Akses ditolak: Akun non-aktif atau diblokir.');
-                    }
-                    // Simpan sesi login permanen di browser
-                    safeSetJSON('wiz_user_session', foundUser);
-                    safeSetJSON('wiz_user_email', cleanEmail);
-                    setUser(foundUser);
-                    setError('');
-                } else {
-                    setError('Kredensial tidak valid. Pastikan email dan sandi benar.');
-                }
-            };
+        if (foundUser) {
+            if (String(foundUser.status || '').trim().toLowerCase() !== 'aktif') {
+                return setError('Akses ditolak: Akun non-aktif atau diblokir.');
+            }
+            safeSetJSON('wiz_user_session', foundUser);
+            safeSetJSON('wiz_user_email', cleanEmail);
+            setUser(foundUser);
+            setError('');
+        } else {
+            setError('Kredensial tidak valid. Pastikan email dan sandi benar.');
+        }
+    };
 
     const handleLogout = () => {
         safeRemove('wiz_user_session');
@@ -159,20 +157,19 @@ const App = () => {
     };
 
     const createSaveHandler = (setter, state, sheetName) => (data, isEdit) => {
-       let newDataToSave = { ...data };
-       if (!isEdit && sheetName === 'Kontak' && user) newDataToSave.createdBy = user.name;
-       let newData = isEdit ? state.map(item => item.id === newDataToSave.id ? newDataToSave : item) : [...state, newDataToSave];
-       setter(newData);
-       safeSetJSON('wiz_cache_' + sheetName, newData);
-       syncDataToSheet(sheetName, newData);
+        let newDataToSave = { ...data };
+        if (!isEdit && sheetName === 'Kontak' && user) newDataToSave.createdBy = user.name;
+        let newData = isEdit ? state.map(item => item.id === newDataToSave.id ? newDataToSave : item) : [...state, newDataToSave];
+        setter(newData);
+        safeSetJSON('wiz_cache_' + sheetName, newData);
+        syncDataToSheet(sheetName, newData);
 
-       // Jika yang diupdate adalah akun Amil yang sedang login, update foto profil di pojok kanan atas seketika
-       if (sheetName === 'Amil' && user && (newDataToSave.id === user.id || String(newDataToSave.email).toLowerCase() === String(user.email).toLowerCase())) {
-           const updatedUser = { ...user, ...newDataToSave };
-           setUser(updatedUser);
-           safeSetJSON('wiz_user_session', updatedUser);
-       }
-   };
+        if (sheetName === 'Amil' && user && (newDataToSave.id === user.id || String(newDataToSave.email).toLowerCase() === String(user.email).toLowerCase())) {
+            const updatedUser = { ...user, ...newDataToSave };
+            setUser(updatedUser);
+            safeSetJSON('wiz_user_session', updatedUser);
+        }
+    };
 
     const createDeleteHandler = (setter, state, sheetName) => (row) => setDeletePrompt({ row, setter, state, sheetName });
 
@@ -389,48 +386,45 @@ const App = () => {
         ]
     };
 
-    // Konfigurasi Menu Pengaturan Sistem dengan Foto Profil Amil
-            const amilConfig = {
-                title: 'Akses Sistem',
-                data: amils,
-                onSave: createSaveHandler(setAmils, amils, 'Amil'),
-                onDelete: createDeleteHandler(setAmils, amils, 'Amil'),
-                columns: [
-                    { 
-                        key: 'photoUrl', 
-                        label: 'Foto Profil', 
-                        render: r => {
-                            const direct = getDirectImageUrl(r.photoUrl);
-                            return (
-                                <div className="w-11 h-11 rounded-full overflow-hidden bg-wiz-green/10 text-wiz-green dark:text-emerald-400 flex items-center justify-center font-bold text-sm border-2 border-white dark:border-gray-700 shadow-sm">
-                                    {direct ? (
-                                        <img 
-                                            src={direct} 
-                                            alt={r.name} 
-                                            className="w-full h-full object-cover cursor-pointer" 
-                                            onClick={() => setViewImage ? setViewImage({ direct: direct, original: r.photoUrl }) : window.open(direct, '_blank')} 
-                                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} 
-                                        />
-                                    ) : null}
-                                    <span style={{ display: direct ? 'none' : 'block' }}>{r.name?.charAt(0) || 'A'}</span>
-                                </div>
-                            );
-                        }
-                    },
-                    { key: 'name', label: 'Nama Pengguna' },
-                    { key: 'email', label: 'Kredensial' },
-                    { key: 'role', label: 'Hak Akses', render: r => <span className={`font-bold ${r.role === 'Admin' ? 'text-wiz-orange dark:text-amber-400' : 'text-wiz-green dark:text-emerald-400'}`}>{r.role}</span> },
-                    { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> }
-                ],
-                schema: [
-                    { name: 'photoUrl', label: 'Foto Profil Amil (Upload ke Cloud)', type: 'file', fullWidth: true },
-                    { name: 'name', label: 'Nama Lengkap', required: true },
-                    { name: 'email', label: 'Email Akses', type: 'email', required: true },
-                    { name: 'password', label: 'Kata Sandi', required: true },
-                    { name: 'role', label: 'Hak Akses', type: 'select', options: ['Admin', 'Amil'], required: true },
-                    { name: 'status', label: 'Status Akun', type: 'select', options: ['Aktif', 'Nonaktif'], required: true }
-                ]
-            };
+    const amilConfig = {
+        title: 'Akses Sistem', data: amils,
+        onSave: createSaveHandler(setAmils, amils, 'Amil'), onDelete: createDeleteHandler(setAmils, amils, 'Amil'),
+        columns: [
+            { 
+                key: 'photoUrl', 
+                label: 'Foto Profil', 
+                render: r => {
+                    const direct = getDirectImageUrl(r.photoUrl);
+                    return (
+                        <div className="w-11 h-11 rounded-full overflow-hidden bg-wiz-green/10 text-wiz-green dark:text-emerald-400 flex items-center justify-center font-bold text-sm border-2 border-white dark:border-gray-700 shadow-sm">
+                            {direct ? (
+                                <img 
+                                    src={direct} 
+                                    alt={r.name} 
+                                    className="w-full h-full object-cover cursor-pointer" 
+                                    onClick={() => setViewImage ? setViewImage({ direct: direct, original: r.photoUrl }) : window.open(direct, '_blank')} 
+                                    onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} 
+                                />
+                            ) : null}
+                            <span style={{ display: direct ? 'none' : 'block' }}>{r.name?.charAt(0) || 'A'}</span>
+                        </div>
+                    );
+                }
+            },
+            { key: 'name', label: 'Nama Pengguna' },
+            { key: 'email', label: 'Kredensial' },
+            { key: 'role', label: 'Hak Akses', render: r => <span className={`font-bold ${r.role === 'Admin' ? 'text-wiz-orange dark:text-amber-400' : 'text-wiz-green dark:text-emerald-400'}`}>{r.role}</span> },
+            { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> }
+        ],
+        schema: [
+            { name: 'photoUrl', label: 'Foto Profil Amil (Upload ke Cloud)', type: 'file', fullWidth: true },
+            { name: 'name', label: 'Nama Lengkap', required: true },
+            { name: 'email', label: 'Email Akses', type: 'email', required: true },
+            { name: 'password', label: 'Kata Sandi', required: true },
+            { name: 'role', label: 'Hak Akses', type: 'select', options: ['Admin', 'Amil'], required: true },
+            { name: 'status', label: 'Status Akun', type: 'select', options: ['Aktif', 'Nonaktif'], required: true }
+        ]
+    };
 
     const navItems = [
         { id: 'dashboard', label: 'Beranda Utama', icon: 'fa-solid fa-border-all' },
@@ -522,27 +516,20 @@ const App = () => {
                                 <div className="hidden sm:block text-right">
                                     <p className="font-bold text-gray-700 dark:text-gray-200 text-sm">{user.name}</p>
                                     <p className="text-[11px] font-semibold text-wiz-orange dark:text-amber-400 uppercase tracking-wide">{user.role}</p>
-                               <div className="relative group cursor-pointer">
-                                    <div className="flex items-center gap-3 pl-3 sm:pl-4 border-l border-gray-200 dark:border-gray-700">
-                                        <div className="hidden sm:block text-right">
-                                            <p className="font-bold text-gray-700 dark:text-gray-200 text-sm">{user.name}</p>
-                                            <p className="text-[11px] font-semibold text-wiz-orange dark:text-amber-400 uppercase tracking-wide">{user.role}</p>
-                                        </div>
-                                        <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-wiz-green to-[#2e8870] flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-gray-700 overflow-hidden">
-                                            {user.photoUrl ? (
-                                                <img 
-                                                    src={getDirectImageUrl(user.photoUrl)} 
-                                                    alt={user.name} 
-                                                    className="w-full h-full object-cover" 
-                                                    onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} 
-                                                />
-                                            ) : null}
-                                            <span style={{ display: user.photoUrl ? 'none' : 'block' }}>
-                                                {user.name?.charAt(0) || 'A'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 ...">
+                                </div>
+                                <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-wiz-green to-[#2e8870] flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-gray-700 overflow-hidden">
+                                    {user.photoUrl ? (
+                                        <img 
+                                            src={getDirectImageUrl(user.photoUrl)} 
+                                            alt={user.name} 
+                                            className="w-full h-full object-cover" 
+                                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} 
+                                        />
+                                    ) : null}
+                                    <span style={{ display: user.photoUrl ? 'none' : 'block' }}>
+                                        {user.name?.charAt(0) || 'A'}
+                                    </span>
+                                </div>
                             </div>
                             <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 py-2 hidden group-hover:block z-50 transform origin-top-right transition-all">
                                 <div className="px-4 py-2 border-b border-gray-50 dark:border-gray-700 mb-1 sm:hidden">
@@ -668,7 +655,9 @@ const App = () => {
                                                         {isAdmin && (
                                                             <div className="mt-4 pt-3 border-t border-gray-50 dark:border-gray-700/50">
                                                                 <button
-                                                                    onClick={() => setCampaignSubTab('campaigns')}
+                                                                    onClick={() => {
+                                                                        setCampaignSubTab('campaigns');
+                                                                    }}
                                                                     className="w-full py-1.5 text-xs text-center font-semibold text-wiz-green dark:text-emerald-400 hover:bg-wiz-green/10 rounded-lg transition-colors"
                                                                 >
                                                                     + Buat Campaign untuk {amil.name}
