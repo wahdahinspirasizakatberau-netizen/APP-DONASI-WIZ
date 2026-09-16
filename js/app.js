@@ -159,13 +159,20 @@ const App = () => {
     };
 
     const createSaveHandler = (setter, state, sheetName) => (data, isEdit) => {
-        let newDataToSave = { ...data };
-        if (!isEdit && sheetName === 'Kontak' && user) newDataToSave.createdBy = user.name;
-        let newData = isEdit ? state.map(item => item.id === newDataToSave.id ? newDataToSave : item) : [...state, newDataToSave];
-        setter(newData);
-        safeSetJSON('wiz_cache_' + sheetName, newData);
-        syncDataToSheet(sheetName, newData);
-    };
+       let newDataToSave = { ...data };
+       if (!isEdit && sheetName === 'Kontak' && user) newDataToSave.createdBy = user.name;
+       let newData = isEdit ? state.map(item => item.id === newDataToSave.id ? newDataToSave : item) : [...state, newDataToSave];
+       setter(newData);
+       safeSetJSON('wiz_cache_' + sheetName, newData);
+       syncDataToSheet(sheetName, newData);
+
+       // Jika yang diupdate adalah akun Amil yang sedang login, update foto profil di pojok kanan atas seketika
+       if (sheetName === 'Amil' && user && (newDataToSave.id === user.id || String(newDataToSave.email).toLowerCase() === String(user.email).toLowerCase())) {
+           const updatedUser = { ...user, ...newDataToSave };
+           setUser(updatedUser);
+           safeSetJSON('wiz_user_session', updatedUser);
+       }
+   };
 
     const createDeleteHandler = (setter, state, sheetName) => (row) => setDeletePrompt({ row, setter, state, sheetName });
 
