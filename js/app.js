@@ -104,15 +104,29 @@ const App = () => {
     useEffect(() => { fetchAllData(); }, []);
 
     const handleLogin = (email, password, setError) => {
-        const foundUser = amils.find(a => a.email.toLowerCase() === email.trim().toLowerCase() && String(a.password) === String(password));
-        if (foundUser) {
-            if(foundUser.status !== 'Aktif') return setError('Akses ditolak: Akun non-aktif.');
-            safeSetJSON('wiz_user_session', foundUser);
-            safeSetJSON('wiz_user_email', email);
-            setUser(foundUser);
-            setError('');
-        } else { setError('Kredensial tidak valid.'); }
-    };
+                const cleanEmail = String(email || '').trim().toLowerCase();
+                const cleanPassword = String(password || '').trim();
+
+                // Cari akun dengan mencocokkan email dan password yang sudah dibersihkan dari spasi liar
+                const foundUser = amils.find(a => {
+                    const amilEmail = String(a.email || '').trim().toLowerCase();
+                    const amilPass = String(a.password || '').trim();
+                    return amilEmail === cleanEmail && amilPass === cleanPassword;
+                });
+
+                if (foundUser) {
+                    if (String(foundUser.status || '').trim().toLowerCase() !== 'aktif') {
+                        return setError('Akses ditolak: Akun non-aktif atau diblokir.');
+                    }
+                    // Simpan sesi login permanen di browser
+                    safeSetJSON('wiz_user_session', foundUser);
+                    safeSetJSON('wiz_user_email', cleanEmail);
+                    setUser(foundUser);
+                    setError('');
+                } else {
+                    setError('Kredensial tidak valid. Pastikan email dan sandi benar.');
+                }
+            };
 
     const handleLogout = () => {
         safeRemove('wiz_user_session');
