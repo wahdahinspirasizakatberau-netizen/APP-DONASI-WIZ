@@ -10,11 +10,17 @@ const formatDate = (dateString) => {
 };
 
 const getDirectImageUrl = (url) => {
-    if (!url) return '';
-    const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
-    if (match && match[1]) return `https://drive.google.com/uc?id=${match[1]}`;
-    return url;
-};
+       if (!url) return '';
+       // Jika link lokal saat baru pilih file, langsung tampilkan
+       if (String(url).startsWith('blob:') || String(url).startsWith('data:')) return url;
+       
+       const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
+       if (match && match[1]) {
+           // Menggunakan server Google UserContent & Thumbnail yang bebas blokir
+           return `https://lh3.googleusercontent.com/d/${match[1]}`;
+       }
+       return url;
+   };
 
 const getDrivePreviewUrl = (url) => {
     if (!url) return '';
