@@ -1,9 +1,20 @@
-// Komponen Dashboard Utama, KPI, Grafik, & Leaderboard
+// Komponen Dashboard Utama dengan Filter Periode & Sortir Donasi Masuk
 
 const DashboardView = ({ data, darkMode }) => {
     const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } = window.Recharts;
-    const { programs, donations, tasks, amils, riwayatPundis = [], pundis = [], contacts = [] } = data;
+    const { programs = [], donations = [], tasks = [], amils = [], riwayatPundis = [], pundis = [], contacts = [] } = data;
     const [selectedPundiBreakdown, setSelectedPundiBreakdown] = useState(null);
+
+    // State Filter Waktu Periode: 'semua', 'bulanan', 'tahunan'
+    const [filterMode, setFilterMode] = useState('semua');
+    const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+    // State Sortir Donasi Masuk: 'terbaru', 'tertinggi', 'terendah', 'terlama'
+    const [donationSortOrder, setDonationSortOrder] = useState('terbaru');
+
+    const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+    const yearOptions = Array.from({length: 7}, (_, i) => new Date().getFullYear() - 3 + i);
 
     const totalPundiCollected = useMemo(() => {
         return riwayatPundis
@@ -11,10 +22,8 @@ const DashboardView = ({ data, darkMode }) => {
             .reduce((sum, r) => sum + Number(r.amount || 0), 0);
     }, [riwayatPundis]);
 
-    // Konsolidasi Campaign Aktif: Pundi Umum & Non-Pundi
     const activeProgramList = useMemo(() => {
         const activeProgramsRaw = programs.filter(p => p.status === 'Aktif');
-        
         const pundiPrograms = activeProgramsRaw.filter(p => 
             (p.category && p.category.includes('Pundi')) || 
             (p.name && p.name.toLowerCase().includes('pundi'))
@@ -25,21 +34,17 @@ const DashboardView = ({ data, darkMode }) => {
         );
 
         const result = [];
-
         if (pundiPrograms.length > 0) {
             const totalTargetPundi = pundiPrograms.reduce((sum, p) => sum + Number(p.target || 0), 0);
-            
             const donationPundiCollected = donations
                 .filter(d => pundiPrograms.some(prog => prog.name === d.programName) && d.status === 'Berhasil')
                 .reduce((sum, d) => sum + Number(d.amount || 0), 0);
             
-            const totalPundiAll = donationPundiCollected + totalPundiCollected;
-
             result.push({
                 id: 'pundi-umum-consolidated',
                 name: 'PUNDI UMUM',
                 target: totalTargetPundi,
-                collected: totalPundiAll,
+                collected: donationPundiCollected + totalPundiCollected,
                 isPundiCampaign: true,
                 isConsolidated: true,
                 subCampaigns: pundiPrograms
@@ -60,37 +65,73 @@ const DashboardView = ({ data, darkMode }) => {
         return result;
     }, [programs, donations, totalPundiCollected]);
 
+    const filteredDonations = useMemo(() => {
+        return donations.filter(d => {
+            if (d.status !== 'Berhasil') return false;
+            if (!d.date) return false;
+            const dObj = new Date(d.date);
+            if (isNaN(dObj.getTime())) return false;
+
+            if (filterMode === 'bulanan') {
+                return dObj.getMonth() === Number(selectedMonth) && dObj.getFullYear() === Number(selectedYear);
+            } else if (filterMode === 'tahunan') {
+                return dObj.getFullYear() === Number(selectedYear);
+            }
+            return true;
+        });
+    }, [donations, filterMode, selectedMonth, selectedYear]);
+
     const stats = useMemo(() => {
-        const donasiReguler = donations.filter(d => d.status === 'Berhasil').reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
-        const totalDonasi = donasiReguler + totalPundiCollected;
-        const uniqueDonors = new Set([...donations.map(d => d.donorName), ...riwayatPundis.map(r => r.donorName)]).size;
+        const donasiReguler = filteredDonations.reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
+        const totalDonasi = filterMode === 'semua' ? (donasiReguler + totalPundiCollected) : donasiReguler;
+        const uniqueDonors = new Set([...filteredDonations.map(d => d.donorName)]).size;
         const completedTasks = tasks.filter(t => t.status === 'Selesai').length;
         return { totalDonasi, uniqueDonors, activePrograms: activeProgramList.length, completedTasks, totalTasks: tasks.length };
-    }, [donations, tasks, activeProgramList, totalPundiCollected, riwayatPundis]);
+    }, [filteredDonations, tasks, activeProgramList, totalPundiCollected, filterMode]);
 
     const donationStats = useMemo(() => {
         const grouped = {};
-        const sortedDonations = [...donations].sort((a, b) => new Date(a.date) - new Date(b.date));
-        sortedDonations.filter(d => d.status === 'Berhasil').forEach(d => {
+        const sortedDonations = [...filteredDonations].sort((a, b) => new Date(a.date) - new Date(b.date));
+        
+        sortedDonations.forEach(d => {
             const dateObj = new Date(d.date);
             if(isNaN(dateObj.getTime())) return;
-            const month = dateObj.toLocaleString('id-ID', { month: 'short', year: 'numeric' });
-            grouped[month] = (grouped[month] || 0) + Number(d.amount);
+            
+            let key = '';
+            if (filterMode === 'bulanan') {
+                key = dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+            } else {
+                key = dateObj.toLocaleString('id-ID', { month: 'short', year: 'numeric' });
+            }
+            grouped[key] = (grouped[key] || 0) + Number(d.amount);
         });
         return Object.keys(grouped).map(key => ({ name: key, total: grouped[key] }));
-    }, [donations]);
+    }, [filteredDonations, filterMode]);
 
     const amilPerformance = useMemo(() => {
         return amils.map(amil => {
-            const amilDonations = donations.filter(d => d.amilName === amil.name && d.status === 'Berhasil');
+            const amilDonations = filteredDonations.filter(d => d.amilName === amil.name);
             const totalDonation = amilDonations.reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
             const amilTasks = tasks.filter(t => t.assignedTo === amil.name);
             const completed = amilTasks.filter(t => t.status === 'Selesai').length;
             return { id: amil.id, name: amil.name, totalDonation, completedTasks: completed, totalTasks: amilTasks.length };
         }).sort((a, b) => b.totalDonation - a.totalDonation);
-    }, [amils, donations, tasks]);
+    }, [amils, filteredDonations, tasks]);
 
-    const recentDonations = [...donations].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+    // Donasi Masuk yang telah diurutkan berdasarkan filter
+    const sortedRecentDonations = useMemo(() => {
+        const list = [...filteredDonations];
+        if (donationSortOrder === 'tertinggi') {
+            list.sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0));
+        } else if (donationSortOrder === 'terendah') {
+            list.sort((a, b) => Number(a.amount || 0) - Number(b.amount || 0));
+        } else if (donationSortOrder === 'terlama') {
+            list.sort((a, b) => new Date(a.date) - new Date(b.date));
+        } else {
+            list.sort((a, b) => new Date(b.date) - new Date(a.date));
+        }
+        return list.slice(0, 6);
+    }, [filteredDonations, donationSortOrder]);
 
     const totalTargetAll = activeProgramList.reduce((sum, p) => sum + Number(p.target || 0), 0);
     const totalCollectedAll = activeProgramList.reduce((sum, p) => sum + Number(p.collected || 0), 0);
@@ -114,7 +155,64 @@ const DashboardView = ({ data, darkMode }) => {
 
     return (
         <div className="space-y-8 slide-up">
-            {/* Ringkasan Header Dashboard */}
+            {/* Filter Waktu Utama */}
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h3 className="font-bold text-gray-800 dark:text-gray-100 text-sm flex items-center gap-2">
+                        <span className="p-1.5 bg-wiz-green/10 text-wiz-green dark:text-emerald-400 rounded-lg">
+                            <i className="fa-solid fa-filter"></i>
+                        </span>
+                        Filter Periode Tren & Donasi Masuk
+                    </h3>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        Pilih untuk menyaring data Semua, Bulanan, atau Tahunan pada dashboard.
+                    </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                    <div className="flex bg-gray-100 dark:bg-gray-700 p-1 rounded-xl">
+                        {[
+                            { id: 'semua', label: 'Semua Data' },
+                            { id: 'bulanan', label: 'Bulanan' },
+                            { id: 'tahunan', label: 'Tahunan' }
+                        ].map(tab => (
+                            <button
+                                key={tab.id}
+                                type="button"
+                                onClick={() => setFilterMode(tab.id)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                    filterMode === tab.id 
+                                        ? 'bg-wiz-green text-white shadow-sm' 
+                                        : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                                }`}
+                            >
+                                {tab.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {filterMode === 'bulanan' && (
+                        <select 
+                            value={selectedMonth} 
+                            onChange={(e) => setSelectedMonth(Number(e.target.value))} 
+                            className="px-3 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer focus:ring-2 focus:ring-wiz-green"
+                        >
+                            {monthNames.map((m, idx) => <option key={idx} value={idx} className="dark:bg-gray-800">{m}</option>)}
+                        </select>
+                    )}
+
+                    {(filterMode === 'bulanan' || filterMode === 'tahunan') && (
+                        <select 
+                            value={selectedYear} 
+                            onChange={(e) => setSelectedYear(Number(e.target.value))} 
+                            className="px-3 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer focus:ring-2 focus:ring-wiz-green"
+                        >
+                            {yearOptions.map(y => <option key={y} value={y} className="dark:bg-gray-800">Tahun {y}</option>)}
+                        </select>
+                    )}
+                </div>
+            </div>
+
+            {/* KPI Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 <StatCard icon="fa-solid fa-wallet" label="Total Donasi Masuk" value={formatRp(stats.totalDonasi)} colorClass="text-wiz-green dark:text-emerald-400" bgClass="bg-wiz-green/10 dark:bg-wiz-green/20" />
                 <StatCard icon="fa-solid fa-user-heart" label="Donatur Berpartisipasi" value={`${stats.uniqueDonors} Orang`} colorClass="text-wiz-orange dark:text-amber-400" bgClass="bg-wiz-orange/10 dark:bg-wiz-orange/20" />
@@ -122,12 +220,18 @@ const DashboardView = ({ data, darkMode }) => {
                 <StatCard icon="fa-solid fa-list-check" label="Kinerja Tugas" value={`${stats.completedTasks} / ${stats.totalTasks}`} subtitle="Tugas terselesaikan" colorClass="text-purple-500 dark:text-purple-400" bgClass="bg-purple-50 dark:bg-purple-900/30" />
             </div>
 
+            {/* Grafik & Leaderboard */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 p-6 lg:col-span-2 transition-shadow">
                     <div className="flex items-center justify-between mb-8">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-wiz-green/10 dark:bg-wiz-green/20 rounded-lg text-wiz-green dark:text-emerald-400"><i className="fa-solid fa-chart-line"></i></div>
-                            <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Tren Penerimaan Donasi</h3>
+                            <div>
+                                <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Tren Penerimaan Donasi</h3>
+                                <p className="text-xs text-gray-400">
+                                    Menampilkan: <b className="text-wiz-green dark:text-emerald-400">{filterMode === 'semua' ? 'Semua Riwayat' : filterMode === 'bulanan' ? `${monthNames[selectedMonth]} ${selectedYear}` : `Tahun ${selectedYear}`}</b>
+                                </p>
+                            </div>
                         </div>
                     </div>
                     <div className="h-72 w-full">
@@ -135,8 +239,8 @@ const DashboardView = ({ data, darkMode }) => {
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={donationStats} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "#374151" : "#f1f5f9"} />
-                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: darkMode ? '#9ca3af' : '#94a3b8', fontSize: 12, fontWeight: 500}} dy={10} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{fill: darkMode ? '#9ca3af' : '#94a3b8', fontSize: 12}} tickFormatter={(value) => `${value / 1000}k`} />
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: darkMode ? '#9ca3af' : '#94a3b8', fontSize: 11, fontWeight: 500}} dy={10} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{fill: darkMode ? '#9ca3af' : '#94a3b8', fontSize: 11}} tickFormatter={(val) => `${val >= 1000000 ? (val/1000000).toFixed(1)+'M' : (val/1000)+'k'}`} />
                                     <Tooltip cursor={{fill: darkMode ? '#374151' : '#f8fafc'}} contentStyle={{borderRadius: '12px', border: darkMode ? '1px solid #4b5563' : '1px solid #e2e8f0', backgroundColor: darkMode ? '#1f2937' : '#ffffff', color: darkMode ? '#f3f4f6' : '#1f2937', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} formatter={(value) => [formatRp(value), "Total"]} />
                                     <Bar dataKey="total" radius={[6, 6, 0, 0]} maxBarSize={45}>
                                         {donationStats.map((entry, index) => (
@@ -148,7 +252,7 @@ const DashboardView = ({ data, darkMode }) => {
                         ) : (
                             <div className="h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-500">
                                 <i className="fa-solid fa-chart-column text-4xl mb-3 text-gray-200 dark:text-gray-700"></i>
-                                <p>Belum ada data grafik donasi</p>
+                                <p className="text-xs">Tidak ada data donasi pada periode filter ini</p>
                             </div>
                         )}
                     </div>
@@ -159,11 +263,11 @@ const DashboardView = ({ data, darkMode }) => {
                         <div className="p-2 bg-yellow-100 dark:bg-yellow-900/40 rounded-lg text-yellow-600 dark:text-yellow-400"><i className="fa-solid fa-award"></i></div>
                         <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Leaderboard Amil</h3>
                     </div>
-                    <div className="space-y-4 overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                    <div className="space-y-4 overflow-y-auto flex-1 pr-2">
                         {amilPerformance.map((amil, idx) => (
                             <div key={amil.id} className="flex items-center justify-between p-4 border border-gray-100 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 hover:bg-wiz-light dark:hover:bg-gray-700/50 transition-all group">
                                 <div className="flex items-center gap-4">
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0 ${idx === 0 ? 'bg-yellow-100 dark:bg-yellow-900/60 text-yellow-700 dark:text-yellow-300 ring-2 ring-yellow-200 dark:ring-yellow-700' : idx === 1 ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 ring-2 ring-gray-200 dark:ring-gray-600' : idx === 2 ? 'bg-orange-100 dark:bg-orange-900/60 text-orange-700 dark:text-orange-300 ring-2 ring-orange-200 dark:ring-orange-700' : 'bg-wiz-green/10 text-wiz-green dark:text-emerald-400'}`}>
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0 ${idx === 0 ? 'bg-yellow-100 dark:bg-yellow-900/60 text-yellow-700 dark:text-yellow-300 ring-2 ring-yellow-200 dark:ring-yellow-700' : idx === 1 ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 ring-2 ring-gray-200 dark:ring-gray-600' : 'bg-wiz-green/10 text-wiz-green dark:text-emerald-400'}`}>
                                         {idx + 1}
                                     </div>
                                     <div>
@@ -181,35 +285,54 @@ const DashboardView = ({ data, darkMode }) => {
                 </div>
             </div>
 
+            {/* Donasi Masuk & Campaign */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 p-6">
-                    <div className="flex items-center justify-between mb-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-blue-50 dark:bg-blue-900/40 rounded-lg text-blue-500 dark:text-blue-400"><i className="fa-solid fa-clock-rotate-left"></i></div>
-                            <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Donasi Masuk Terbaru</h3>
+                            <div>
+                                <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">
+                                    {donationSortOrder === 'tertinggi' ? 'Donasi Nominal Tertinggi' : donationSortOrder === 'terendah' ? 'Donasi Nominal Terendah' : donationSortOrder === 'terlama' ? 'Donasi Masuk Terlama' : 'Donasi Masuk Terbaru'}
+                                </h3>
+                                <p className="text-xs text-gray-400">{filteredDonations.length} Transaksi Terfilter</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <select
+                                value={donationSortOrder}
+                                onChange={(e) => setDonationSortOrder(e.target.value)}
+                                className="px-3 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer focus:ring-2 focus:ring-wiz-green"
+                            >
+                                <option value="terbaru">🕒 Donasi Terbaru</option>
+                                <option value="tertinggi">💰 Nominal Tertinggi</option>
+                                <option value="terendah">📉 Nominal Terendah</option>
+                                <option value="terlama">🗓️ Donasi Terlama</option>
+                            </select>
                         </div>
                     </div>
                     <div className="space-y-4">
-                        {recentDonations.length > 0 ? recentDonations.map((donasi) => (
+                        {sortedRecentDonations.length > 0 ? sortedRecentDonations.map((donasi) => (
                             <div key={donasi.id} className="flex justify-between items-center p-4 border border-gray-100 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                                 <div className="flex items-center gap-4">
                                     <div className="w-10 h-10 rounded-full bg-wiz-green/10 dark:bg-wiz-green/20 text-wiz-green dark:text-emerald-400 flex items-center justify-center font-bold">
                                         {donasi.donorName.charAt(0)}
                                     </div>
                                     <div>
-                                        <p className="font-bold text-gray-800 dark:text-gray-100">{donasi.donorName}</p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{donasi.programName}</p>
+                                        <p className="font-bold text-gray-800 dark:text-gray-100 text-sm">{donasi.donorName}</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{donasi.programName} • <span className="text-wiz-orange">{donasi.amilName}</span></p>
                                     </div>
                                 </div>
                                 <div className="text-right">
-                                    <p className="font-bold text-gray-800 dark:text-gray-100">{formatRp(donasi.amount)}</p>
+                                    <p className="font-bold text-gray-800 dark:text-gray-100 text-sm">{formatRp(donasi.amount)}</p>
                                     <p className="text-xs text-gray-400 dark:text-gray-500 font-medium">{formatDate(donasi.date)}</p>
                                 </div>
                             </div>
-                        )) : <p className="text-gray-400 dark:text-gray-500 text-center py-6 italic text-sm">Belum ada histori donasi.</p>}
+                        )) : <p className="text-gray-400 dark:text-gray-500 text-center py-6 italic text-sm">Tidak ada donasi masuk pada periode filter ini.</p>}
                     </div>
                 </div>
 
+                {/* Progress Campaign */}
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 p-6 flex flex-col">
                     <div className="flex items-center gap-3 mb-6">
                         <div className="p-2 bg-wiz-orange/10 dark:bg-wiz-orange/20 rounded-lg text-wiz-orange dark:text-amber-400"><i className="fa-solid fa-bars-progress"></i></div>
@@ -235,44 +358,30 @@ const DashboardView = ({ data, darkMode }) => {
                         </div>
                     )}
 
-                    <div className="space-y-6 overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                    <div className="space-y-6 overflow-y-auto flex-1 pr-2">
                         {activeProgramList.length > 0 ? activeProgramList.map(prog => {
                             const percent = prog.target > 0 ? Math.min(Math.round((prog.collected / prog.target) * 100), 100) : 0;
                             return (
-                                <div 
-                                    key={prog.id} 
-                                    onClick={() => prog.isPundiCampaign ? setSelectedPundiBreakdown(prog) : null}
-                                    className={`space-y-2.5 transition-all ${prog.isPundiCampaign ? 'cursor-pointer p-3.5 -mx-2 rounded-2xl hover:bg-wiz-light dark:hover:bg-gray-700/60 border border-transparent hover:border-wiz-green/20 group' : ''}`}
-                                    title={prog.isPundiCampaign ? "Klik untuk melihat rincian capaian target per amil" : ""}
-                                >
+                                <div key={prog.id} className="space-y-2">
                                     <div className="flex justify-between items-center text-sm">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <span className={`font-bold text-gray-700 dark:text-gray-200 ${prog.isPundiCampaign ? 'group-hover:text-wiz-green dark:group-hover:text-emerald-400 transition-colors' : ''}`}>
-                                                {prog.name}
-                                            </span>
-                                            {prog.isPundiCampaign && (
-                                                <span className="px-2 py-0.5 bg-wiz-orange/10 dark:bg-amber-900/30 text-wiz-orange dark:text-amber-400 text-[11px] font-bold rounded-lg flex items-center gap-1 border border-wiz-orange/20">
-                                                    <i className="fa-solid fa-users"></i> Klik Rincian Amil
-                                                </span>
-                                            )}
-                                        </div>
-                                        <span className="text-wiz-orange dark:text-amber-400 font-bold bg-wiz-orange/10 dark:bg-wiz-orange/20 px-2 py-0.5 rounded text-xs">{percent}%</span>
+                                        <span className="font-bold text-gray-700 dark:text-gray-200">{prog.name}</span>
+                                        <span className="text-wiz-orange font-bold text-xs">{percent}%</span>
                                     </div>
                                     <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
-                                        <div className="bg-wiz-green dark:bg-emerald-500 h-2 rounded-full transition-all duration-1000 ease-out" style={{ width: `${percent}%` }}></div>
+                                        <div className="bg-wiz-green h-2 rounded-full transition-all duration-700" style={{ width: `${percent}%` }}></div>
                                     </div>
-                                    <div className="flex justify-between text-[11px] font-semibold text-gray-400 dark:text-gray-400">
-                                        <span className="text-wiz-green dark:text-emerald-400">Terkumpul: {formatRp(prog.collected)}</span>
+                                    <div className="flex justify-between text-[11px] font-semibold text-gray-400">
+                                        <span className="text-wiz-green dark:text-emerald-400">{formatRp(prog.collected)}</span>
                                         <span>Target: {formatRp(prog.target)}</span>
                                     </div>
                                 </div>
                             );
-                        }) : <p className="text-gray-400 dark:text-gray-500 text-center py-6 italic text-sm">Tidak ada program aktif saat ini.</p>}
+                        }) : <p className="text-gray-400 dark:text-gray-500 text-center py-6 text-sm">Tidak ada program aktif.</p>}
                     </div>
                 </div>
             </div>
 
-            {/* Modal Rincian Capaian Pundi Umum per Amil */}
+            {/* Modal Rincian Target & Capaian Pundi */}
             <Modal isOpen={!!selectedPundiBreakdown} onClose={() => setSelectedPundiBreakdown(null)} title="Rincian Target & Capaian Pundi per Amil">
                 {selectedPundiBreakdown && (
                     <div className="space-y-5">
@@ -299,7 +408,7 @@ const DashboardView = ({ data, darkMode }) => {
                             <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-400 mb-3">
                                 Kontribusi & Capaian Masing-Masing Amil:
                             </h4>
-                            <div className="space-y-3 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
+                            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                                 {(() => {
                                     const activePundiAmils = amils.map(amil => {
                                         const amilSpecificCampaigns = selectedPundiBreakdown.subCampaigns?.filter(p => p.assignedAmil === amil.name) || [];
