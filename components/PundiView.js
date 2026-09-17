@@ -1,44 +1,106 @@
 // Komponen Manajemen Pundi WIZ (Dashboard Sinkron, Tugas Penarikan Interaktif, Detail Data, Cetak & Scroll Mandiri)
 
-const { useState, useEffect, useMemo, useRef } = React;
+const { useState, useEffect, useMemo, useRef } = React || window.React || {};
 
-// Fallback aman untuk fungsi global
-const formatRp = window.formatRp || ((num) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num || 0));
-const formatDate = window.formatDate || ((d) => d || '-');
-const parseMapUrls = window.parseMapUrls || ((url) => ({ navUrl: url || '#', webUrl: url || '#' }));
-const getDriveThumbnailUrl = window.getDriveThumbnailUrl || ((url) => url || '');
+const formatRp = (num) => {
+    if (typeof window.formatRp === 'function') return window.formatRp(num);
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num || 0);
+};
 
-const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundis, contacts = [], programs = [], user = {}, syncDataToSheet, darkMode, setViewImage, amils = [], setActiveTab }) => {
+const formatDate = (dateString) => {
+    if (typeof window.formatDate === 'function') return window.formatDate(dateString);
+    if (!dateString) return '-';
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return dateString;
+    return new Intl.DateTimeFormat('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }).format(d);
+};
+
+const parseMapUrls = (input) => {
+    if (typeof window.parseMapUrls === 'function') return window.parseMapUrls(input);
+    const raw = String(input || '').trim();
+    if (!raw) return { navUrl: '#', webUrl: '#' };
+    return { navUrl: raw, webUrl: raw };
+};
+
+const getDriveThumbnailUrl = (url) => {
+    if (typeof window.getDriveThumbnailUrl === 'function') return window.getDriveThumbnailUrl(url);
+    return url || '';
+};
+
+const SafeButton = ({ children, onClick, variant = 'primary', className = '', type = 'button', icon, disabled = false }) => {
+    if (window.Button) return <window.Button onClick={onClick} variant={variant} className={className} type={type} icon={icon} disabled={disabled}>{children}</window.Button>;
+    const base = "flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-semibold text-xs transition-all disabled:opacity-50 shadow-sm cursor-pointer";
+    const bg = variant === 'primary' ? 'bg-[#27745F] text-white hover:bg-[#1B5444]' : variant === 'accent' ? 'bg-[#F59121] text-white hover:bg-[#D87A15]' : variant === 'secondary' ? 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50' : 'bg-gray-100 text-gray-700';
+    return (
+        <button type={type} onClick={onClick} disabled={disabled} className={`${base} ${bg} ${className}`}>
+            {icon && <i className={icon}></i>}
+            {children}
+        </button>
+    );
+};
+
+const SafeModal = ({ isOpen, onClose, title, children }) => {
+    if (window.Modal) return <window.Modal isOpen={isOpen} onClose={onClose} title={title}>{children}</window.Modal>;
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-gray-900/60 dark:bg-black/75 backdrop-blur-sm">
+            <div className="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto border border-gray-100 dark:border-gray-700 text-gray-800 dark:text-gray-100 flex flex-col">
+                {title && (
+                    <div className="flex items-center justify-between p-4 sm:p-5 border-b border-gray-100 dark:border-gray-700 sticky top-0 bg-white/95 dark:bg-gray-800/95 backdrop-blur z-10">
+                        <h2 className="text-base sm:text-lg font-bold truncate pr-2">{title}</h2>
+                        <button onClick={onClose} className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-500 rounded-full transition-colors">
+                            <i className="fa-solid fa-xmark text-lg"></i>
+                        </button>
+                    </div>
+                )}
+                <div className="p-4 sm:p-6 overflow-y-auto">{children}</div>
+            </div>
+        </div>
+    );
+};
+
+const PundiView = ({
+    pundis = [],
+    setPundis = () => {},
+    riwayatPundis = [],
+    setRiwayatPundis = () => {},
+    contacts = [],
+    programs = [],
+    user = {},
+    syncDataToSheet = () => {},
+    darkMode = false,
+    setViewImage = () => {},
+    amils = [],
+    setActiveTab = () => {}
+}) => {
     const [activeSubTab, setActiveSubTab] = useState('dashboard');
     const [selectedAmilFilter, setSelectedAmilFilter] = useState(user?.role === 'Admin' ? 'Semua' : (user?.name || 'Semua'));
-    
-    // Modal input penjemputan & edit riwayat
+
+    // Modal kontrol
     const [isInputModalOpen, setIsInputModalOpen] = useState(false);
     const [selectedPundi, setSelectedPundi] = useState(null);
-    const [isQuickScanOpen, setIsQuickScanOpen] = useState(false);
     const [printQR, setPrintQR] = useState(null);
     const [editingRiwayat, setEditingRiwayat] = useState(null);
     const [isEditRiwayatOpen, setIsEditRiwayatOpen] = useState(false);
 
-    // Modal Lihat Data / Detail Lengkap Pundi
+    // Modal Rincian / Lihat Data Lengkap Pundi
     const [detailPundi, setDetailPundi] = useState(null);
 
-    // Modal List Khusus Pundi Belum Dijemput dari Dashboard
+    // Modal List Khusus Pundi Belum Dijemput dari Klik Card Dashboard
     const [isBelumDijemputModalOpen, setIsBelumDijemputModalOpen] = useState(false);
 
-    // State Checklist Pilihan Cetak Tugas
+    // State Checklist Pilihan Tugas Penarikan
     const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
 
     // Filter Master Pundi
     const [searchMaster, setSearchMaster] = useState('');
     const [statusMasterFilter, setStatusMasterFilter] = useState('Semua');
-    const [creatorMasterFilter, setCreatorMasterFilter] = useState('Semua');
     const [tipeMasterFilter, setTipeMasterFilter] = useState('Semua');
     const [masterSortOrder, setMasterSortOrder] = useState('asc');
 
     // Filter Tugas Penarikan
     const [searchTugas, setSearchTugas] = useState('');
-    const [statusTugasFilter, setStatusTugasFilter] = useState('Semua'); // 'Semua', 'Belum', 'Dijemput', 'Sudah Ditarik'
+    const [statusTugasFilter, setStatusTugasFilter] = useState('Semua');
     const [tipeTugasFilter, setTipeTugasFilter] = useState('Semua');
     const [urutAwal, setUrutAwal] = useState('');
     const [urutAkhir, setUrutAkhir] = useState('');
@@ -53,45 +115,42 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
     const [dashMonth, setDashMonth] = useState(new Date().getMonth());
     const [dashYear, setDashYear] = useState(new Date().getFullYear());
     const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-    const yearOptions = Array.from({length: 7}, (_, i) => new Date().getFullYear() - 3 + i);
+    const yearOptions = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 3 + i);
 
     const isAdmin = user?.role === 'Admin';
-    const effectiveAmil = isAdmin ? selectedAmilFilter : user?.name;
+    const effectiveAmil = isAdmin ? selectedAmilFilter : (user?.name || '');
 
     const visiblePundis = useMemo(() => {
-        if (isAdmin && effectiveAmil === 'Semua') {
-            return pundis;
-        }
-        return pundis.filter(p => {
-            const creator = p.createdBy || contacts.find(c => c.name === p.donorName)?.createdBy;
+        const safeList = Array.isArray(pundis) ? pundis : [];
+        if (isAdmin && effectiveAmil === 'Semua') return safeList;
+        return safeList.filter(p => {
+            const creator = p.createdBy || (Array.isArray(contacts) && contacts.find(c => c.name === p.donorName)?.createdBy);
             return creator === effectiveAmil;
         });
     }, [pundis, isAdmin, effectiveAmil, contacts]);
 
     const visibleRiwayatPundis = useMemo(() => {
-        if (isAdmin && effectiveAmil === 'Semua') {
-            return riwayatPundis;
-        }
-        return riwayatPundis.filter(r => r.amilName === effectiveAmil);
+        const safeList = Array.isArray(riwayatPundis) ? riwayatPundis : [];
+        if (isAdmin && effectiveAmil === 'Semua') return safeList;
+        return safeList.filter(r => r.amilName === effectiveAmil);
     }, [riwayatPundis, isAdmin, effectiveAmil]);
 
     const allAmilNames = useMemo(() => {
         const names = new Set((amils || []).map(a => a.name));
-        pundis.forEach(p => {
-            const c = p.createdBy || contacts.find(cnt => cnt.name === p.donorName)?.createdBy;
+        (pundis || []).forEach(p => {
+            const c = p.createdBy || (contacts || []).find(cnt => cnt.name === p.donorName)?.createdBy;
             if (c) names.add(c);
         });
-        riwayatPundis.forEach(r => {
+        (riwayatPundis || []).forEach(r => {
             if (r.amilName) names.add(r.amilName);
         });
         return Array.from(names).filter(Boolean);
     }, [amils, pundis, riwayatPundis, contacts]);
 
-    const uniqueAmils = allAmilNames;
-
     const uniqueMonths = useMemo(() => {
         const map = new Map();
         visibleRiwayatPundis.forEach(r => {
+            if (!r.date) return;
             const d = new Date(r.date);
             if (!isNaN(d.getTime())) {
                 const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -103,13 +162,12 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
     }, [visibleRiwayatPundis]);
 
     const activePundiCampaign = useMemo(() => {
-        return programs.find(p => p.status === 'Aktif' && ((p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'))));
+        return (programs || []).find(p => p.status === 'Aktif' && ((p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'))));
     }, [programs]);
 
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
 
-    // Analitik Tersinkronisasi (Berdasarkan dashMonth & dashYear)
     const stats = useMemo(() => {
         const activeBoxes = visiblePundis.filter(p => p.status === 'Aktif');
         const totalAktif = activeBoxes.length;
@@ -126,7 +184,6 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
             return matchMonth && matchYear;
         });
 
-        // Nominal Terkumpul Berhasil
         const riwayatBerhasil = riwayatPeriode.filter(r => r.status === 'Berhasil');
         const totalDanaBulanIni = riwayatBerhasil.reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
@@ -144,7 +201,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
             }
         });
 
-        // Status Kotak di Periode Ini
+        // Lacak kotak yang berstatus Berhasil ditarik atau Sedang Dijemput pada periode ini
         const pickedUpBoxIds = new Set();
         const inProgressBoxIds = new Set();
 
@@ -159,12 +216,12 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
 
         const ditarikBerhasilCount = riwayatBerhasil.length;
         const sedangDijemputCount = activeBoxes.filter(p => inProgressBoxIds.has(String(p.id)) || inProgressBoxIds.has(String(p.noUrut))).length;
-        
-        // Kotak yang benar-benar belum dijemput (belum berhasil ditarik & belum berstatus dijemput)
-        const pundiBelumDijemputList = activeBoxes.filter(p => 
-            !pickedUpBoxIds.has(String(p.id)) && 
-            !pickedUpBoxIds.has(String(p.noUrut)) && 
-            !inProgressBoxIds.has(String(p.id)) && 
+
+        // Pundi yang belum pernah dikunjungi atau dicetak pada periode ini
+        const pundiBelumDijemputList = activeBoxes.filter(p =>
+            !pickedUpBoxIds.has(String(p.id)) &&
+            !pickedUpBoxIds.has(String(p.noUrut)) &&
+            !inProgressBoxIds.has(String(p.id)) &&
             !inProgressBoxIds.has(String(p.noUrut))
         );
         const belumDijemputCount = pundiBelumDijemputList.length;
@@ -172,8 +229,8 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         // Target Campaign Proporsional
         let targetPeriode = 0;
         if (activePundiCampaign) {
-            targetPeriode = dashMonth === 'Semua' 
-                ? Number(activePundiCampaign.target || 0) 
+            targetPeriode = dashMonth === 'Semua'
+                ? Number(activePundiCampaign.target || 0)
                 : Math.round(Number(activePundiCampaign.target || 0) / 12);
         }
 
@@ -195,25 +252,24 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         };
     }, [visiblePundis, visibleRiwayatPundis, dashMonth, dashYear, activePundiCampaign]);
 
-    const activePundisSorted = [...visiblePundis].filter(p => p.status === 'Aktif').sort((a, b) => Number(a.noUrut) - Number(b.noUrut));
+    const activePundisSorted = [...visiblePundis].filter(p => p.status === 'Aktif').sort((a, b) => Number(a.noUrut || 0) - Number(b.noUrut || 0));
 
-    // Filter Tugas Penarikan Bulan Ini
     const filteredTugasPundis = useMemo(() => {
         return activePundisSorted.filter(p => {
-            const currentRecord = visibleRiwayatPundis.find(r => 
-                String(r.pundiId) === String(p.id) && 
-                new Date(r.date).getMonth() === currentMonth && 
+            const currentRecord = visibleRiwayatPundis.find(r =>
+                String(r.pundiId) === String(p.id) &&
+                r.date && new Date(r.date).getMonth() === currentMonth &&
                 new Date(r.date).getFullYear() === currentYear
             );
             const pStatus = currentRecord ? currentRecord.status : 'Belum';
-            
+
             const term = searchTugas.toLowerCase().trim();
             const matchSearch = !term ||
                 String(p.noUrut || '').toLowerCase().includes(term) ||
                 String(p.donorName || '').toLowerCase().includes(term) ||
                 String(p.usaha || '').toLowerCase().includes(term) ||
                 String(p.alamat || '').toLowerCase().includes(term);
-            
+
             let matchStatus = false;
             if (statusTugasFilter === 'Semua') matchStatus = true;
             else if (statusTugasFilter === 'Belum' && pStatus === 'Belum') matchStatus = true;
@@ -222,7 +278,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
 
             const matchTipe = tipeTugasFilter === 'Semua' || (p.tipePundi || 'Pundi Umum') === tipeTugasFilter;
 
-            const pNo = Number(p.noUrut);
+            const pNo = Number(p.noUrut || 0);
             const matchUrutAwal = urutAwal === '' || isNaN(Number(urutAwal)) || pNo >= Number(urutAwal);
             const matchUrutAkhir = urutAkhir === '' || isNaN(Number(urutAkhir)) || pNo <= Number(urutAkhir);
 
@@ -230,7 +286,6 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         });
     }, [activePundisSorted, visibleRiwayatPundis, searchTugas, statusTugasFilter, tipeTugasFilter, urutAwal, urutAkhir, currentMonth, currentYear]);
 
-    // Handle Checkbox Pilihan Tugas
     const toggleSelectTask = (id) => {
         setSelectedTaskIds(prev => {
             const next = new Set(prev);
@@ -256,16 +311,15 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         return filteredTugasPundis;
     };
 
-    // Otomatis ubah status pundi menjadi "Dijemput" saat dicetak
     const markPundisAsDijemput = (pundisPrinted) => {
         const todayStr = new Date().toISOString().split('T')[0];
         let newOrUpdatedRiwayat = [...riwayatPundis];
         let hasChanges = false;
 
         pundisPrinted.forEach(p => {
-            const existingIdx = newOrUpdatedRiwayat.findIndex(r => 
-                String(r.pundiId) === String(p.id) && 
-                new Date(r.date).getMonth() === currentMonth && 
+            const existingIdx = newOrUpdatedRiwayat.findIndex(r =>
+                String(r.pundiId) === String(p.id) &&
+                r.date && new Date(r.date).getMonth() === currentMonth &&
                 new Date(r.date).getFullYear() === currentYear
             );
 
@@ -296,13 +350,13 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         });
 
         if (hasChanges) {
-            setPundis && setPundis([...pundis]);
             setRiwayatPundis(newOrUpdatedRiwayat);
-            syncDataToSheet && syncDataToSheet('RiwayatPundi', newOrUpdatedRiwayat);
+            if (typeof syncDataToSheet === 'function') {
+                syncDataToSheet('RiwayatPundi', newOrUpdatedRiwayat);
+            }
         }
     };
 
-    // Cetak Lembar Checklist Penarikan dengan nomor urut otomatis running (1, 2, 3...)
     const handlePrintChecklist = () => {
         const dataToPrint = getPundisToPrint();
         if (dataToPrint.length === 0) return;
@@ -310,14 +364,15 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         markPundisAsDijemput(dataToPrint);
 
         const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
         const tglCetak = new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
         const totalItem = dataToPrint.length;
         const printPetugasName = selectedAmilFilter !== 'Semua' ? selectedAmilFilter : (user?.name || '-');
-        
         const fontSize = totalItem > 25 ? '8.5px' : '9.5px';
         const cellPadding = totalItem > 25 ? '3px 4px' : '5px 6px';
 
-        let html = `
+        const html = `
         <html>
         <head>
             <title>Checklist Penarikan Pundi ZIS - WIZ Berau</title>
@@ -414,7 +469,6 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         setTimeout(() => { printWindow.print(); }, 500);
     };
 
-    // Cetak 10 Nota A4 dengan penomoran otomatis
     const handlePrintNotaA4 = () => {
         const dataToPrint = getPundisToPrint();
         if (dataToPrint.length === 0) return;
@@ -422,6 +476,8 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         markPundisAsDijemput(dataToPrint);
 
         const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
         const tglHariIni = new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
         const printPetugasName = selectedAmilFilter !== 'Semua' ? selectedAmilFilter : (user?.name || '...................');
 
@@ -430,7 +486,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
             chunks.push(dataToPrint.slice(i, i + 10));
         }
 
-        let pagesHtml = chunks.map((group, pageIdx) => `
+        const pagesHtml = chunks.map((group, pageIdx) => `
             <div class="a4-page">
                 ${group.map((p, itemIdx) => {
                     const runningNum = pageIdx * 10 + itemIdx + 1;
@@ -477,7 +533,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
             </div>
         `).join('');
 
-        let html = `
+        const html = `
         <html>
         <head>
             <title>Cetak Nota Pundi A4 - WIZ Berau</title>
@@ -525,31 +581,36 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
     const savePundi = (formData, isEdit) => {
         const now = new Date().toISOString();
         const existing = isEdit ? pundis.find(p => String(p.id) === String(formData.id)) : null;
-        let newData = { 
+        const newData = {
             ...(existing || {}),
-            ...formData, 
+            ...formData,
             tipePundi: formData.tipePundi || (existing && existing.tipePundi) || 'Pundi Umum',
-            updatedAt: now 
+            updatedAt: now
         };
         if (!isEdit) {
             newData.id = Date.now();
             newData.createdAt = now;
             newData.createdBy = user?.name || 'Admin';
         }
-        const updatedList = isEdit 
-            ? pundis.map(p => String(p.id) === String(newData.id) ? newData : p) 
+        const updatedList = isEdit
+            ? pundis.map(p => String(p.id) === String(newData.id) ? newData : p)
             : [...pundis, newData];
-        setPundis && setPundis(updatedList);
-        syncDataToSheet && syncDataToSheet('Pundi', updatedList);
+        setPundis(updatedList);
+        if (typeof syncDataToSheet === 'function') {
+            syncDataToSheet('Pundi', updatedList);
+        }
     };
 
     const deletePundi = (row) => {
         const updatedList = pundis.filter(p => String(p.id) !== String(row.id));
-        setPundis && setPundis(updatedList);
-        syncDataToSheet && syncDataToSheet('Pundi', updatedList);
+        setPundis(updatedList);
+        if (typeof syncDataToSheet === 'function') {
+            syncDataToSheet('Pundi', updatedList);
+        }
     };
 
     const submitInputHasil = (formData) => {
+        if (!selectedPundi) return;
         const now = new Date().toISOString();
         const transaction = {
             id: Date.now(),
@@ -565,9 +626,12 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
             receiptUrl: formData.receiptUrl || ''
         };
         const updatedRiwayat = [...riwayatPundis, transaction];
-        setRiwayatPundis && setRiwayatPundis(updatedRiwayat);
-        syncDataToSheet && syncDataToSheet('RiwayatPundi', updatedRiwayat);
+        setRiwayatPundis(updatedRiwayat);
+        if (typeof syncDataToSheet === 'function') {
+            syncDataToSheet('RiwayatPundi', updatedRiwayat);
+        }
         setIsInputModalOpen(false);
+        setSelectedPundi(null);
     };
 
     const handleOpenEditRiwayat = (row) => {
@@ -576,6 +640,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
     };
 
     const saveEditRiwayat = (formData) => {
+        if (!editingRiwayat) return;
         const updated = riwayatPundis.map(r => {
             if (String(r.id) === String(editingRiwayat.id)) {
                 return {
@@ -587,16 +652,20 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
             }
             return r;
         });
-        setRiwayatPundis && setRiwayatPundis(updated);
-        syncDataToSheet && syncDataToSheet('RiwayatPundi', updated);
+        setRiwayatPundis(updated);
+        if (typeof syncDataToSheet === 'function') {
+            syncDataToSheet('RiwayatPundi', updated);
+        }
         setIsEditRiwayatOpen(false);
         setEditingRiwayat(null);
     };
 
     const deleteRiwayat = (row) => {
         const updated = riwayatPundis.filter(r => String(r.id) !== String(row.id));
-        setRiwayatPundis && setRiwayatPundis(updated);
-        syncDataToSheet && syncDataToSheet('RiwayatPundi', updated);
+        setRiwayatPundis(updated);
+        if (typeof syncDataToSheet === 'function') {
+            syncDataToSheet('RiwayatPundi', updated);
+        }
     };
 
     return (
@@ -611,14 +680,14 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                 </div>
 
                 <div className="flex items-center gap-3">
-                    <Button 
+                    <SafeButton 
                         onClick={() => setActiveTab('scanner')} 
                         variant="primary" 
                         className="hidden lg:flex shadow-md shadow-wiz-green/30 px-5"
                         icon="fa-solid fa-camera"
                     >
                         Pindai QR Pundi
-                    </Button>
+                    </SafeButton>
 
                     {isAdmin ? (
                         <div className="flex items-center gap-3 bg-white dark:bg-gray-800 px-4 py-2 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm">
@@ -662,13 +731,13 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                     { id: 'riwayat', label: 'Riwayat Sedekah', icon: 'fa-money-bill-wave' }
                 ].map(tab => (
                     <button key={tab.id} onClick={() => setActiveSubTab(tab.id)}
-                        className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all whitespace-nowrap ${activeSubTab === tab.id ? 'bg-wiz-green text-white shadow-md' : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-700'}`}>
+                        className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all whitespace-nowrap cursor-pointer ${activeSubTab === tab.id ? 'bg-wiz-green text-white shadow-md' : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-700'}`}>
                         <i className={`fa-solid ${tab.icon}`}></i> {tab.label}
                     </button>
                 ))}
             </div>
 
-            {/* SUBTAB 1: DASHBOARD ANALITIK TERSINKRON */}
+            {}
             {activeSubTab === 'dashboard' && (
                 <div className="space-y-6 animate-in">
                     {/* Bar Filter Periode */}
@@ -795,7 +864,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                 </div>
             )}
 
-            {/* SUBTAB 2: TUGAS PENARIKAN (CHECKBOX, AUTO DIJEMPUT, LIHAT DATA, SCROLL MANDIRI) */}
+            {}
             {activeSubTab === 'tugas' && (
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 sm:p-6 animate-in space-y-5">
                     {/* Header Bar & Tombol Cetak */}
@@ -818,13 +887,13 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                             <button
                                 type="button"
                                 onClick={toggleSelectAllFiltered}
-                                className="px-3 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                                className="px-3 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
                             >
                                 <i className={`fa-solid ${selectedTaskIds.size === filteredTugasPundis.length && filteredTugasPundis.length > 0 ? 'fa-square-check text-wiz-green' : 'fa-square'}`}></i>
                                 <span>{selectedTaskIds.size === filteredTugasPundis.length && filteredTugasPundis.length > 0 ? 'Batal Pilih Semua' : 'Pilih Semua'}</span>
                             </button>
 
-                            <Button 
+                            <SafeButton 
                                 onClick={handlePrintChecklist} 
                                 icon="fa-solid fa-print" 
                                 variant="secondary" 
@@ -832,9 +901,9 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                                 disabled={getPundisToPrint().length === 0}
                             >
                                 Cetak Checklist ({getPundisToPrint().length})
-                            </Button>
+                            </SafeButton>
 
-                            <Button 
+                            <SafeButton 
                                 onClick={handlePrintNotaA4} 
                                 icon="fa-solid fa-receipt" 
                                 variant="primary" 
@@ -842,7 +911,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                                 disabled={getPundisToPrint().length === 0}
                             >
                                 Cetak Nota A4 ({getPundisToPrint().length})
-                            </Button>
+                            </SafeButton>
                         </div>
                     </div>
 
@@ -860,7 +929,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                                 className="w-full pl-9 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl text-xs focus:ring-2 focus:ring-wiz-green outline-none text-gray-800 dark:text-gray-100"
                             />
                             {searchTugas && (
-                                <button onClick={() => setSearchTugas('')} className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-gray-400 hover:text-gray-600">
+                                <button onClick={() => setSearchTugas('')} className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer">
                                     <i className="fa-solid fa-xmark text-xs"></i>
                                 </button>
                             )}
@@ -878,7 +947,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                                         key={item.id}
                                         type="button"
                                         onClick={() => setStatusTugasFilter(item.id)}
-                                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${statusTugasFilter === item.id ? 'bg-wiz-green text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100'}`}
+                                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${statusTugasFilter === item.id ? 'bg-wiz-green text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100'}`}
                                     >
                                         {item.label}
                                     </button>
@@ -906,9 +975,9 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                             </div>
                         ) : (
                             filteredTugasPundis.map((p) => {
-                                const currentRecord = visibleRiwayatPundis.find(r => 
-                                    String(r.pundiId) === String(p.id) && 
-                                    new Date(r.date).getMonth() === currentMonth && 
+                                const currentRecord = visibleRiwayatPundis.find(r =>
+                                    String(r.pundiId) === String(p.id) &&
+                                    r.date && new Date(r.date).getMonth() === currentMonth &&
                                     new Date(r.date).getFullYear() === currentYear
                                 );
                                 const tStatus = currentRecord ? currentRecord.status : 'Belum';
@@ -971,7 +1040,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                                             <button
                                                 type="button"
                                                 onClick={() => setDetailPundi(p)}
-                                                className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1"
+                                                className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
                                                 title="Lihat Rincian Data Pundi"
                                             >
                                                 <i className="fa-solid fa-eye text-wiz-orange"></i> Lihat Data
@@ -981,7 +1050,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                                                 <button 
                                                     type="button"
                                                     onClick={() => handleOpenEditRiwayat(currentRecord)} 
-                                                    className="px-3 py-1.5 bg-wiz-green hover:bg-wiz-green_dark text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+                                                    className="px-3 py-1.5 bg-wiz-green hover:bg-wiz-green_dark text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
                                                 >
                                                     <i className="fa-solid fa-calculator"></i> Hitung Uang
                                                 </button>
@@ -989,18 +1058,18 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                                                 <button 
                                                     type="button"
                                                     onClick={() => handleOpenEditRiwayat(currentRecord)} 
-                                                    className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-blue-200 dark:border-blue-800"
+                                                    className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-blue-200 dark:border-blue-800 cursor-pointer"
                                                 >
                                                     <i className="fa-solid fa-pen-to-square"></i> Edit Hasil
                                                 </button>
                                             ) : (
-                                                <Button 
+                                                <SafeButton 
                                                     onClick={() => { setSelectedPundi(p); setIsInputModalOpen(true); }} 
                                                     variant="accent" 
                                                     className="text-xs py-1.5 px-3"
                                                 >
                                                     <i className="fa-solid fa-hand-holding-box mr-1"></i> Jemput
-                                                </Button>
+                                                </SafeButton>
                                             )}
                                         </div>
                                     </div>
@@ -1011,7 +1080,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                 </div>
             )}
 
-            {/* SUBTAB 3: DATA MASTER PUNDI (DENGAN TOMBOL LIHAT DATA & SCROLL MANDIRI) */}
+            {}
             {activeSubTab === 'master' && (
                 <div className="space-y-4 animate-in">
                     <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
@@ -1054,83 +1123,86 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                     </div>
 
                     <div className="max-h-[62vh] overflow-y-auto pr-1 custom-scrollbar pb-8">
-                        <ModuleView 
-                            title="Data Kotak Pundi" 
-                            data={visiblePundis.filter(p => {
-                                const term = searchMaster.toLowerCase().trim();
-                                const matchSearch = !term || String(p.noUrut).includes(term) || String(p.donorName).toLowerCase().includes(term) || String(p.usaha).toLowerCase().includes(term);
-                                const matchStatus = statusMasterFilter === 'Semua' || p.status === statusMasterFilter;
-                                const matchTipe = tipeMasterFilter === 'Semua' || (p.tipePundi || 'Pundi Umum') === tipeMasterFilter;
-                                return matchSearch && matchStatus && matchTipe;
-                            })} 
-                            columns={[
-                                { key: 'noUrut', label: 'No. Urut', render: r => <span className="font-bold text-wiz-green">#{r.noUrut}</span> },
-                                { key: 'usaha', label: 'Nama Usaha / Lokasi', render: r => <div><p className="font-bold">{r.usaha}</p><p className="text-xs text-gray-400">{r.donorName} ({r.tipePundi || 'Pundi Umum'})</p></div> },
-                                { key: 'alamat', label: 'Alamat Pundi' },
-                                { key: 'status', label: 'Status', render: r => <span className={`px-2 py-1 rounded text-xs font-bold ${r.status === 'Aktif' ? 'bg-wiz-green/10 text-wiz-green' : 'bg-red-50 text-red-500'}`}>{r.status}</span> },
-                                { key: 'action_view', label: 'Rincian', render: r => (
-                                    <button 
-                                        type="button" 
-                                        onClick={() => setDetailPundi(r)} 
-                                        className="p-2 text-wiz-green hover:bg-wiz-green/10 rounded-lg text-xs font-bold flex items-center gap-1"
-                                        title="Buka Lembar Detail Pundi"
-                                    >
-                                        <i className="fa-solid fa-eye text-sm"></i> Lihat
-                                    </button>
-                                )},
-                                { key: 'print', label: 'QR', render: r => (
-                                    <button onClick={() => setPrintQR(r)} className="p-2 text-wiz-orange hover:bg-wiz-orange/10 rounded-lg" title="Cetak Stiker">
-                                        <i className="fa-solid fa-qrcode text-lg"></i>
-                                    </button>
-                                )}
-                            ]} 
-                            schema={[
-                                { name: 'noUrut', label: 'Nomor Urut Pundi (Angka)', type: 'number', required: true },
-                                { name: 'tipePundi', label: 'Jenis Pundi', type: 'select', options: ['Pundi Umum', 'Pundi Pribadi'], required: true },
-                                { name: 'donorName', label: 'Nama Donatur', type: 'text', required: true },
-                                { name: 'phone', label: 'Nomor WA', type: 'text', required: true },
-                                { name: 'usaha', label: 'Nama Usaha / Lokasi Titik', required: true },
-                                { name: 'status', label: 'Status', type: 'select', options: ['Aktif', 'Ditarik'], required: true },
-                                { name: 'alamat', label: 'Alamat Lengkap', type: 'berau_address', fullWidth: true, required: true },
-                                { name: 'mapUrl', label: 'Titik Maps GPS', type: 'map_location', fullWidth: true }
-                            ]} 
-                            defaultValues={{ status: 'Aktif', tipePundi: 'Pundi Umum' }}
-                            onSave={savePundi} 
-                            onDelete={isAdmin ? deletePundi : null} 
-                            canDelete={isAdmin}
-                        />
+                        {window.ModuleView ? (
+                            <window.ModuleView 
+                                title="Data Kotak Pundi" 
+                                data={visiblePundis.filter(p => {
+                                    const term = searchMaster.toLowerCase().trim();
+                                    const matchSearch = !term || String(p.noUrut || '').includes(term) || String(p.donorName || '').toLowerCase().includes(term) || String(p.usaha || '').toLowerCase().includes(term);
+                                    const matchStatus = statusMasterFilter === 'Semua' || p.status === statusMasterFilter;
+                                    const matchTipe = tipeMasterFilter === 'Semua' || (p.tipePundi || 'Pundi Umum') === tipeMasterFilter;
+                                    return matchSearch && matchStatus && matchTipe;
+                                })} 
+                                columns={[
+                                    { key: 'noUrut', label: 'No. Urut', render: r => <span className="font-bold text-wiz-green">#{r.noUrut}</span> },
+                                    { key: 'usaha', label: 'Nama Usaha / Lokasi', render: r => <div><p className="font-bold">{r.usaha}</p><p className="text-xs text-gray-400">{r.donorName} ({r.tipePundi || 'Pundi Umum'})</p></div> },
+                                    { key: 'alamat', label: 'Alamat Pundi' },
+                                    { key: 'status', label: 'Status', render: r => <span className={`px-2 py-1 rounded text-xs font-bold ${r.status === 'Aktif' ? 'bg-wiz-green/10 text-wiz-green' : 'bg-red-50 text-red-500'}`}>{r.status}</span> },
+                                    { key: 'action_view', label: 'Rincian', render: r => (
+                                        <button 
+                                            type="button" 
+                                            onClick={() => setDetailPundi(r)} 
+                                            className="p-2 text-wiz-green hover:bg-wiz-green/10 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                            title="Buka Lembar Detail Pundi"
+                                        >
+                                            <i className="fa-solid fa-eye text-sm"></i> Lihat
+                                        </button>
+                                    )},
+                                    { key: 'print', label: 'QR', render: r => (
+                                        <button onClick={() => setPrintQR(r)} className="p-2 text-wiz-orange hover:bg-wiz-orange/10 rounded-lg cursor-pointer" title="Cetak Stiker">
+                                            <i className="fa-solid fa-qrcode text-lg"></i>
+                                        </button>
+                                    )}
+                                ]} 
+                                schema={[
+                                    { name: 'noUrut', label: 'Nomor Urut Pundi (Angka)', type: 'number', required: true },
+                                    { name: 'tipePundi', label: 'Jenis Pundi', type: 'select', options: ['Pundi Umum', 'Pundi Pribadi'], required: true },
+                                    { name: 'donorName', label: 'Nama Donatur', type: 'text', required: true },
+                                    { name: 'phone', label: 'Nomor WA', type: 'text', required: true },
+                                    { name: 'usaha', label: 'Nama Usaha / Lokasi Titik', required: true },
+                                    { name: 'status', label: 'Status', type: 'select', options: ['Aktif', 'Ditarik'], required: true },
+                                    { name: 'alamat', label: 'Alamat Lengkap', type: 'berau_address', fullWidth: true, required: true },
+                                    { name: 'mapUrl', label: 'Titik Maps GPS', type: 'map_location', fullWidth: true }
+                                ]} 
+                                defaultValues={{ status: 'Aktif', tipePundi: 'Pundi Umum' }}
+                                onSave={savePundi} 
+                                onDelete={isAdmin ? deletePundi : null} 
+                                canDelete={isAdmin}
+                            />
+                        ) : null}
                     </div>
                 </div>
             )}
 
-            {/* SUBTAB 4: RIWAYAT SEDEKAH */}
             {activeSubTab === 'riwayat' && (
                 <div className="space-y-4 animate-in">
                     <div className="max-h-[62vh] overflow-y-auto pr-1 custom-scrollbar pb-8">
-                        <Table 
-                            columns={[
-                                { key: 'date', label: 'Tanggal', render: r => formatDate(r.date) },
-                                { key: 'donorName', label: 'Donatur & Usaha', render: r => <div><p className="font-bold">{r.donorName}</p><p className="text-xs text-gray-500">{r.usaha} (No. {r.noUrut})</p></div> },
-                                { key: 'amount', label: 'Nominal', render: r => <span className="font-bold text-wiz-green">{formatRp(r.amount)}</span> },
-                                { key: 'status', label: 'Status', render: r => <span className={`px-2 py-1 rounded text-xs font-bold ${r.status === 'Berhasil' ? 'bg-wiz-green/10 text-wiz-green' : r.status === 'Dijemput' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-50 text-red-500'}`}>{r.status}</span> },
-                                { key: 'amilName', label: 'Amil Petugas' },
-                                { key: 'notes', label: 'Catatan', render: r => <span className="text-xs text-gray-400">{r.notes || '-'}</span> }
-                            ]}
-                            data={[...visibleRiwayatPundis].sort((a,b) => new Date(b.date) - new Date(a.date))}
-                            onEdit={handleOpenEditRiwayat}
-                            onDelete={isAdmin ? deleteRiwayat : null}
-                        />
+                        {window.Table ? (
+                            <window.Table 
+                                columns={[
+                                    { key: 'date', label: 'Tanggal', render: r => formatDate(r.date) },
+                                    { key: 'donorName', label: 'Donatur & Usaha', render: r => <div><p className="font-bold">{r.donorName}</p><p className="text-xs text-gray-500">{r.usaha} (No. {r.noUrut})</p></div> },
+                                    { key: 'amount', label: 'Nominal', render: r => <span className="font-bold text-wiz-green">{formatRp(r.amount)}</span> },
+                                    { key: 'status', label: 'Status', render: r => <span className={`px-2 py-1 rounded text-xs font-bold ${r.status === 'Berhasil' ? 'bg-wiz-green/10 text-wiz-green' : r.status === 'Dijemput' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-50 text-red-500'}`}>{r.status}</span> },
+                                    { key: 'amilName', label: 'Amil Petugas' },
+                                    { key: 'notes', label: 'Catatan', render: r => <span className="text-xs text-gray-400">{r.notes || '-'}</span> }
+                                ]}
+                                data={[...visibleRiwayatPundis].sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0))}
+                                onEdit={handleOpenEditRiwayat}
+                                onDelete={isAdmin ? deleteRiwayat : null}
+                            />
+                        ) : null}
                     </div>
                 </div>
             )}
 
-            {/* MODAL 1: LIHAT DATA DETAIL LENGKAP PUNDI */}
-            <Modal isOpen={!!detailPundi} onClose={() => setDetailPundi(null)} title={detailPundi ? `Detail Pundi #${detailPundi.noUrut} - ${detailPundi.usaha}` : 'Detail Pundi'}>
+            {}
+            <SafeModal isOpen={!!detailPundi} onClose={() => setDetailPundi(null)} title={detailPundi ? `Detail Pundi #${detailPundi.noUrut} - ${detailPundi.usaha}` : 'Detail Pundi'}>
                 {detailPundi && (() => {
                     const rawPhone = String(detailPundi.phone || '').replace(/[^0-9]/g, '');
                     const cleanPhone = rawPhone.startsWith('0') ? '62' + rawPhone.slice(1) : (rawPhone.startsWith('8') ? '62' + rawPhone : rawPhone);
                     const mapUrls = parseMapUrls(detailPundi.mapUrl);
-                    const riwayatPundiIni = visibleRiwayatPundis.filter(r => String(r.pundiId) === String(detailPundi.id) || String(r.noUrut) === String(detailPundi.noUrut)).sort((a, b) => new Date(b.date) - new Date(a.date));
+                    const riwayatPundiIni = visibleRiwayatPundis.filter(r => String(r.pundiId) === String(detailPundi.id) || String(r.noUrut) === String(detailPundi.noUrut)).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 
                     return (
                         <div className="space-y-4 text-xs">
@@ -1207,15 +1279,15 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                             </div>
 
                             <div className="flex justify-end pt-2">
-                                <Button variant="secondary" onClick={() => setDetailPundi(null)}>Tutup</Button>
+                                <SafeButton variant="secondary" onClick={() => setDetailPundi(null)}>Tutup</SafeButton>
                             </div>
                         </div>
                     );
                 })()}
-            </Modal>
+            </SafeModal>
 
-            {/* MODAL 2: DAFTAR PUNDI BELUM DIJEMPUT (DARI KLIK KARTU DASHBOARD) */}
-            <Modal isOpen={isBelumDijemputModalOpen} onClose={() => setIsBelumDijemputModalOpen(false)} title={`Pundi Belum Dijemput Periode Ini (${stats.belumDijemputCount})`}>
+            {}
+            <SafeModal isOpen={isBelumDijemputModalOpen} onClose={() => setIsBelumDijemputModalOpen(false)} title={`Pundi Belum Dijemput Periode Ini (${stats.belumDijemputCount})`}>
                 <div className="space-y-3">
                     <p className="text-xs text-gray-500">Berikut daftar kotak pundi aktif yang belum dijemput atau belum dicetak pada periode ini:</p>
                     <div className="max-h-[50vh] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
@@ -1238,7 +1310,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                                     <button
                                         type="button"
                                         onClick={() => { setDetailPundi(p); setIsBelumDijemputModalOpen(false); }}
-                                        className="px-2.5 py-1.5 bg-wiz-green/10 hover:bg-wiz-green text-wiz-green hover:text-white rounded-lg text-xs font-bold transition-all shrink-0"
+                                        className="px-2.5 py-1.5 bg-wiz-green/10 hover:bg-wiz-green text-wiz-green hover:text-white rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer"
                                     >
                                         Lihat Data
                                     </button>
@@ -1247,15 +1319,15 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                         )}
                     </div>
                     <div className="flex justify-end pt-2 border-t border-gray-100 dark:border-gray-700">
-                        <Button variant="secondary" onClick={() => setIsBelumDijemputModalOpen(false)}>Tutup</Button>
+                        <SafeButton variant="secondary" onClick={() => setIsBelumDijemputModalOpen(false)}>Tutup</SafeButton>
                     </div>
                 </div>
-            </Modal>
+            </SafeModal>
 
-            {/* MODAL 3: INPUT LAPORAN PENJEMPUTAN */}
-            <Modal isOpen={isInputModalOpen} onClose={() => { setIsInputModalOpen(false); setSelectedPundi(null); }} title={selectedPundi ? `Laporan Penarikan: ${selectedPundi.usaha}` : 'Laporan Penarikan'}>
-                {selectedPundi && (
-                    <DynamicForm 
+            {}
+            <SafeModal isOpen={isInputModalOpen} onClose={() => { setIsInputModalOpen(false); setSelectedPundi(null); }} title={selectedPundi ? `Laporan Penarikan: ${selectedPundi.usaha}` : 'Laporan Penarikan'}>
+                {selectedPundi && window.DynamicForm && (
+                    <window.DynamicForm 
                         schema={[
                             { name: 'date', label: 'Tanggal Penarikan', type: 'date', required: true },
                             { name: 'status', label: 'Status Penjemputan', type: 'select', options: [{value: 'Dijemput', label: 'Kotak Dijemput (Hitung Nanti)'}, {value: 'Berhasil', label: 'Langsung Dihitung (Selesai)'}, {value: 'Gagal', label: 'Gagal / Pundi Kosong'}], required: true },
@@ -1271,12 +1343,11 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                         onCancel={() => { setIsInputModalOpen(false); setSelectedPundi(null); }}
                     />
                 )}
-            </Modal>
+            </SafeModal>
 
-            {/* MODAL 4: EDIT LAPORAN RIWAYAT */}
-            <Modal isOpen={isEditRiwayatOpen} onClose={() => { setIsEditRiwayatOpen(false); setEditingRiwayat(null); }} title={`Edit Laporan: ${editingRiwayat?.usaha || ''}`}>
-                {editingRiwayat && (
-                    <DynamicForm 
+            <SafeModal isOpen={isEditRiwayatOpen} onClose={() => { setIsEditRiwayatOpen(false); setEditingRiwayat(null); }} title={`Edit Laporan: ${editingRiwayat?.usaha || ''}`}>
+                {editingRiwayat && window.DynamicForm && (
+                    <window.DynamicForm 
                         schema={[
                             { name: 'date', label: 'Tanggal Penarikan', type: 'date', required: true },
                             { name: 'status', label: 'Status Penjemputan', type: 'select', options: [{value: 'Berhasil', label: 'Selesai Dihitung (Berhasil)'}, {value: 'Dijemput', label: 'Masih Dijemput (Belum Dihitung)'}, {value: 'Gagal', label: 'Gagal / Pundi Kosong'}], required: true },
@@ -1289,10 +1360,10 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                         onCancel={() => { setIsEditRiwayatOpen(false); setEditingRiwayat(null); }}
                     />
                 )}
-            </Modal>
+            </SafeModal>
 
-            {/* MODAL 5: CETAK STIKER QR PUNDI */}
-            <Modal isOpen={!!printQR} onClose={() => setPrintQR(null)} title="Cetak Stiker Pundi">
+            {}
+            <SafeModal isOpen={!!printQR} onClose={() => setPrintQR(null)} title="Cetak Stiker Pundi">
                 {printQR && (
                     <div className="flex flex-col items-center space-y-4">
                         <div id="print-qr-area" className="w-72 bg-white border-2 border-wiz-green rounded-3xl p-6 flex flex-col items-center text-center shadow-lg relative overflow-hidden">
@@ -1311,9 +1382,10 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                         </div>
                         
                         <div className="flex gap-3 w-full">
-                            <Button variant="secondary" className="flex-1" onClick={() => setPrintQR(null)}>Tutup</Button>
-                            <Button variant="primary" className="flex-1" icon="fa-solid fa-print" onClick={() => {
+                            <SafeButton variant="secondary" className="flex-1" onClick={() => setPrintQR(null)}>Tutup</SafeButton>
+                            <SafeButton variant="primary" className="flex-1" icon="fa-solid fa-print" onClick={() => {
                                 const pw = window.open('', '_blank');
+                                if (!pw) return;
                                 pw.document.write(`
                                     <html><head><title>Stiker QR Pundi - #${printQR.noUrut}</title><script src="https://cdn.tailwindcss.com"><\/script></head>
                                     <body class="flex items-center justify-center p-10 bg-white">
@@ -1322,14 +1394,13 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                                     </body></html>
                                 `);
                                 pw.document.close();
-                            }}>Cetak</Button>
+                            }}>Cetak</SafeButton>
                         </div>
                     </div>
                 )}
-            </Modal>
+            </SafeModal>
         </div>
     );
 };
 
-// Pasang ke objek window global agar tidak ada kendala antar file script
 window.PundiView = PundiView;
