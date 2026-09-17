@@ -1,4 +1,191 @@
 // Komponen Manajemen Pundi WIZ (Dashboard, Tugas Penarikan, Master Pundi, Riwayat Sedekah, Cetak)
+// Versi Lengkap 100% Seluruh Menu & Fitur Asli
+
+const { useState, useEffect, useMemo, useRef } = React;
+
+const safeFormatRp = (number) => {
+    if (typeof formatRp === 'function') return formatRp(number);
+    if (typeof window !== 'undefined' && typeof window.formatRp === 'function') return window.formatRp(number);
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number || 0);
+};
+
+const safeFormatDate = (dateString) => {
+    if (typeof formatDate === 'function') return formatDate(dateString);
+    if (typeof window !== 'undefined' && typeof window.formatDate === 'function') return window.formatDate(dateString);
+    if (!dateString) return '-';
+    try {
+        const d = new Date(dateString);
+        if (isNaN(d.getTime())) return dateString;
+        return new Intl.DateTimeFormat('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }).format(d);
+    } catch(e) { return String(dateString); }
+};
+
+const safeGetDirectImageUrl = (url) => {
+    if (typeof getDirectImageUrl === 'function') return getDirectImageUrl(url);
+    if (typeof window !== 'undefined' && typeof window.getDirectImageUrl === 'function') return window.getDirectImageUrl(url);
+    if (!url) return '';
+    const match = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/) || String(url).match(/id=([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) return `https://lh3.googleusercontent.com/d/${match[1]}`;
+    return url;
+};
+
+const safeParseMapUrls = (input) => {
+    if (typeof parseMapUrls === 'function') return parseMapUrls(input);
+    if (typeof window !== 'undefined' && typeof window.parseMapUrls === 'function') return window.parseMapUrls(input);
+    if (!input) return { navUrl: '', webUrl: '' };
+    return { navUrl: input, webUrl: input };
+};
+
+const Button = window.Button || (({ children, onClick, variant = 'primary', className = '', type = 'button', icon, disabled = false }) => {
+    const baseStyle = "flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm";
+    const variants = {
+        primary: "bg-wiz-green hover:bg-wiz-green_dark text-white focus:ring-wiz-green hover:shadow-md",
+        accent: "bg-gradient-to-r from-wiz-orange to-[#fca545] hover:from-wiz-orange_dark hover:to-wiz-orange text-white focus:ring-wiz-orange shadow-md",
+        secondary: "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200",
+        danger: "bg-red-50 text-red-600 hover:bg-red-500 hover:text-white border border-red-100",
+        ghost: "bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
+    };
+    return (
+        <button type={type} onClick={onClick} disabled={disabled} className={`${baseStyle} ${variants[variant] || variants.primary} ${className}`}>
+            {icon && <i className={icon}></i>}
+            {children}
+        </button>
+    );
+});
+
+const Modal = window.Modal || (({ isOpen, onClose, title, children }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-gray-900/60 dark:bg-black/75 backdrop-blur-sm animate-in">
+            <div className="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-lg max-h-[92vh] sm:max-h-[90vh] overflow-y-auto slide-up border border-white/20 dark:border-gray-700 text-gray-800 dark:text-gray-100 flex flex-col">
+                {title && (
+                    <div className="flex items-center justify-between p-4 sm:p-5 border-b border-gray-100 dark:border-gray-700 sticky top-0 bg-white/95 dark:bg-gray-800/95 backdrop-blur z-10">
+                        <h2 className="text-base sm:text-xl font-bold text-gray-800 dark:text-gray-100 truncate pr-2">{title}</h2>
+                        <button onClick={onClose} className="w-9 h-9 flex items-center justify-center text-gray-400 hover:text-wiz-green dark:hover:text-emerald-400 hover:bg-wiz-green/10 dark:hover:bg-gray-700 rounded-full transition-colors shrink-0">
+                            <i className="fa-solid fa-xmark text-lg"></i>
+                        </button>
+                    </div>
+                )}
+                <div className="p-4 sm:p-6 pb-8 sm:pb-6 overflow-y-auto">
+                    {children}
+                </div>
+            </div>
+        </div>
+    );
+});
+
+const ModuleView = window.ModuleView || (({ title, columns, data, schema, defaultValues, onSave, onDelete, canAdd = true, canEdit = true, canDelete = true }) => {
+    const [isAddEditOpen, setIsAddEditOpen] = useState(false);
+    const [editItem, setEditItem] = useState(null);
+    const [formData, setFormData] = useState({});
+
+    const handleOpenAdd = () => {
+        setEditItem(null);
+        setFormData(defaultValues || {});
+        setIsAddEditOpen(true);
+    };
+
+    const handleOpenEdit = (item) => {
+        setEditItem(item);
+        setFormData({ ...item });
+        setIsAddEditOpen(true);
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onSave(formData, !!editItem);
+        setIsAddEditOpen(false);
+    };
+
+    return (
+        <div className="space-y-4">
+            <div className="flex justify-between items-center">
+                <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">{title}</h3>
+                {canAdd && (
+                    <Button onClick={handleOpenAdd} icon="fa-solid fa-plus" variant="primary" className="text-xs">
+                        Tambah Pundi Baru
+                    </Button>
+                )}
+            </div>
+
+            <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                    <thead className="bg-gray-50 dark:bg-gray-700/60 text-gray-600 dark:text-gray-300 font-semibold border-b border-gray-100 dark:border-gray-700">
+                        <tr>
+                            {columns.map((col, idx) => <th key={idx} className="px-5 py-3.5">{col.label}</th>)}
+                            {(canEdit || canDelete) && <th className="px-5 py-3.5 text-center">Aksi</th>}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
+                        {data.length === 0 ? (
+                            <tr><td colSpan={columns.length + 1} className="px-6 py-8 text-center text-gray-400">Belum ada data.</td></tr>
+                        ) : data.map((row, idx) => (
+                            <tr key={idx} className="hover:bg-wiz-light dark:hover:bg-gray-700/50">
+                                {columns.map((col, cIdx) => <td key={cIdx} className="px-5 py-3.5">{col.render ? col.render(row) : row[col.key]}</td>)}
+                                {(canEdit || canDelete) && (
+                                    <td className="px-5 py-3.5 text-center">
+                                        <div className="flex items-center justify-center gap-1.5">
+                                            {canEdit && (
+                                                <button onClick={() => handleOpenEdit(row)} className="p-1.5 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg text-xs" title="Edit">
+                                                    <i className="fa-solid fa-pen-to-square"></i>
+                                                </button>
+                                            )}
+                                            {canDelete && onDelete && (
+                                                <button onClick={() => onDelete(row)} className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg text-xs" title="Hapus">
+                                                    <i className="fa-solid fa-trash-can"></i>
+                                                </button>
+                                            )}
+                                        </div>
+                                    </td>
+                                )}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+
+            <Modal isOpen={isAddEditOpen} onClose={() => setIsAddEditOpen(false)} title={editItem ? `Edit ${title}` : `Tambah ${title}`}>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    {schema.map(f => (
+                        <div key={f.name}>
+                            <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1">{f.label} {f.required && '*'}</label>
+                            {f.type === 'select' ? (
+                                <select 
+                                    value={formData[f.name] || ''} 
+                                    onChange={(e) => setFormData({ ...formData, [f.name]: e.target.value })}
+                                    required={f.required}
+                                    className="w-full p-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-sm"
+                                >
+                                    {f.options.map((opt, oIdx) => <option key={oIdx} value={opt}>{opt}</option>)}
+                                </select>
+                            ) : f.type === 'textarea' || f.type === 'berau_address' ? (
+                                <textarea 
+                                    value={formData[f.name] || ''} 
+                                    onChange={(e) => setFormData({ ...formData, [f.name]: e.target.value })}
+                                    required={f.required}
+                                    rows={2}
+                                    className="w-full p-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-sm"
+                                />
+                            ) : (
+                                <input 
+                                    type={f.type || 'text'} 
+                                    value={formData[f.name] || ''} 
+                                    onChange={(e) => setFormData({ ...formData, [f.name]: e.target.value })}
+                                    required={f.required}
+                                    className="w-full p-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-sm"
+                                />
+                            )}
+                        </div>
+                    ))}
+                    <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-700">
+                        <Button variant="secondary" onClick={() => setIsAddEditOpen(false)}>Batal</Button>
+                        <Button type="submit" variant="primary">Simpan</Button>
+                    </div>
+                </form>
+            </Modal>
+        </div>
+    );
+});
 
 const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contacts, programs = [], user, syncDataToSheet, darkMode, setViewImage, amils = [], setActiveTab }) => {
     const [activeSubTab, setActiveSubTab] = useState('dashboard');
@@ -46,8 +233,8 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     };
 
     const saveEditRiwayat = (formData) => {
-        const updated = riwayatPundis.map(r => {
-            if (String(r.id) === String(editingRiwayat.id)) {
+        const updated = (riwayatPundis || []).map(r => {
+            if (String(r.id) === String(editingRiwayat?.id)) {
                 return {
                     ...r,
                     ...formData,
@@ -58,19 +245,19 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             return r;
         });
         setRiwayatPundis(updated);
-        syncDataToSheet('RiwayatPundi', updated);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', updated);
         setIsEditRiwayatOpen(false);
         setEditingRiwayat(null);
     };
 
     const deleteRiwayat = (row) => {
-        const updated = riwayatPundis.filter(r => String(r.id) !== String(row.id));
+        const updated = (riwayatPundis || []).filter(r => String(r.id) !== String(row.id));
         setRiwayatPundis(updated);
-        syncDataToSheet('RiwayatPundi', updated);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', updated);
     };
 
     const isAdmin = user?.role === 'Admin';
-    const effectiveAmil = isAdmin ? selectedAmilFilter : user.name;
+    const effectiveAmil = isAdmin ? selectedAmilFilter : user?.name;
 
     const visiblePundis = useMemo(() => {
         const safePundis = Array.isArray(pundis) ? pundis : [];
@@ -115,7 +302,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     }, [visibleRiwayatPundis]);
 
     const activePundiCampaign = useMemo(() => {
-        return programs.find(p => p.status === 'Aktif' && ((p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'))));
+        return (programs || []).find(p => p.status === 'Aktif' && ((p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'))));
     }, [programs]);
 
     const currentMonth = new Date().getMonth();
@@ -275,7 +462,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     }, [visibleRiwayatPundis, searchRiwayat, statusRiwayatFilter, monthRiwayatFilter, amilRiwayatFilter]);
     
     const nextNoUrut = useMemo(() => {
-        return pundis.reduce((max, p) => Math.max(max, Number(p.noUrut) || 0), 0) + 1;
+        return (pundis || []).reduce((max, p) => Math.max(max, Number(p.noUrut) || 0), 0) + 1;
     }, [pundis]);
 
     const handleQuickScan = (val) => {
@@ -285,9 +472,9 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         let foundPundi = null;
         if (cleanVal.includes('WIZ-PUNDI-')) {
             const extractedId = cleanVal.split('WIZ-PUNDI-')[1].trim();
-            foundPundi = pundis.find(p => String(p.id) === String(extractedId));
+            foundPundi = (pundis || []).find(p => String(p.id) === String(extractedId));
         } else if (!isNaN(cleanVal) && cleanVal.length > 0) {
-            foundPundi = pundis.find(p => String(p.noUrut) === cleanVal);
+            foundPundi = (pundis || []).find(p => String(p.noUrut) === cleanVal);
         }
 
         if (foundPundi) {
@@ -305,7 +492,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
     const markAsDijemput = (pundisToUpdate) => {
         const todayStr = new Date().toISOString().split('T')[0];
-        let newRiwayat = [...riwayatPundis];
+        let newRiwayat = [...(riwayatPundis || [])];
         let isChanged = false;
 
         pundisToUpdate.forEach(p => {
@@ -332,7 +519,6 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     };
 
     const handlePrintChecklist = () => {
-        // Ambil data yang dicentang, jika tidak ada yang dicentang ambil semua hasil filter
         const dataToPrint = selectedTaskIds.size > 0 ? filteredTugasPundis.filter(p => selectedTaskIds.has(p.id)) : filteredTugasPundis;
         if (dataToPrint.length === 0) return;
 
@@ -554,7 +740,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
     const savePundi = (formData, isEdit) => {
         const now = new Date().toISOString();
-        const existing = isEdit ? pundis.find(p => String(p.id) === String(formData.id)) : null;
+        const existing = isEdit ? (pundis || []).find(p => String(p.id) === String(formData.id)) : null;
         let newData = { 
             ...(existing || {}),
             ...formData, 
@@ -564,19 +750,19 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         if (!isEdit) {
             newData.id = Date.now();
             newData.createdAt = now;
-            newData.createdBy = user.name;
+            newData.createdBy = user?.name || 'Admin';
         }
         const updatedList = isEdit 
-            ? pundis.map(p => String(p.id) === String(newData.id) ? newData : p) 
-            : [...pundis, newData];
+            ? (pundis || []).map(p => String(p.id) === String(newData.id) ? newData : p) 
+            : [...(pundis || []), newData];
         setPundis(updatedList);
-        syncDataToSheet('Pundi', updatedList);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('Pundi', updatedList);
     };
 
     const deletePundi = (row) => {
-        const updatedList = pundis.filter(p => String(p.id) !== String(row.id));
+        const updatedList = (pundis || []).filter(p => String(p.id) !== String(row.id));
         setPundis(updatedList);
-        syncDataToSheet('Pundi', updatedList);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('Pundi', updatedList);
     };
 
     const submitInputHasil = (formData) => {
@@ -584,19 +770,19 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         const transaction = {
             id: Date.now(),
             date: formData.date || now.split('T')[0],
-            pundiId: selectedPundi.id,
-            noUrut: selectedPundi.noUrut,
-            donorName: selectedPundi.donorName,
-            usaha: selectedPundi.usaha,
+            pundiId: selectedPundi?.id,
+            noUrut: selectedPundi?.noUrut,
+            donorName: selectedPundi?.donorName,
+            usaha: selectedPundi?.usaha,
             amount: formData.amount || 0,
             status: formData.status,
-            amilName: user.name,
+            amilName: user?.name || 'Amil',
             notes: formData.notes || '',
             receiptUrl: formData.receiptUrl || ''
         };
-        const updatedRiwayat = [...riwayatPundis, transaction];
+        const updatedRiwayat = [...(riwayatPundis || []), transaction];
         setRiwayatPundis(updatedRiwayat);
-        syncDataToSheet('RiwayatPundi', updatedRiwayat);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', updatedRiwayat);
         setIsInputModalOpen(false);
     };
 
@@ -629,7 +815,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             <div className="space-y-1">
                 <span className="truncate max-w-[200px] block text-gray-500">{r.alamat}</span>
                 {r.mapUrl ? (() => {
-                    const mapUrls = typeof parseMapUrls === 'function' ? parseMapUrls(r.mapUrl) : { navUrl: r.mapUrl, webUrl: r.mapUrl };
+                    const mapUrls = safeParseMapUrls(r.mapUrl);
                     return (
                         <div className="flex items-center gap-1.5 flex-wrap">
                             <a
@@ -686,7 +872,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
                 <div className="flex items-center gap-3">
                     <Button 
-                        onClick={() => setActiveTab('scanner')} 
+                        onClick={() => typeof setActiveTab === 'function' && setActiveTab('scanner')} 
                         variant="primary" 
                         className="hidden lg:flex shadow-md shadow-wiz-green/30 px-5"
                         icon="fa-solid fa-camera"
@@ -786,7 +972,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black uppercase tracking-wider mb-2">
                                     <i className="fa-solid fa-sack-dollar"></i> Capaian Bulan Ini
                                 </div>
-                                <h3 className="text-3xl font-black">{typeof formatRp === 'function' ? formatRp(stats.totalDanaBulanIni) : stats.totalDanaBulanIni}</h3>
+                                <h3 className="text-3xl font-black">{safeFormatRp(stats.totalDanaBulanIni)}</h3>
                                 {activePundiCampaign && (
                                     <p className="text-white/80 text-xs mt-1">Terhubung ke Program: <b>{activePundiCampaign.name}</b></p>
                                 )}
@@ -796,7 +982,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 <div className="bg-white/15 backdrop-blur-md px-5 py-3 rounded-2xl border border-white/20 flex items-center gap-6">
                                     <div>
                                         <p className="text-[10px] uppercase font-bold text-white/75">Target Terbagi</p>
-                                        <p className="text-lg font-black">{typeof formatRp === 'function' ? formatRp(stats.targetPeriode) : stats.targetPeriode}</p>
+                                        <p className="text-lg font-black">{safeFormatRp(stats.targetPeriode)}</p>
                                     </div>
                                     <div className="h-8 w-px bg-white/20"></div>
                                     <div className="text-right">
@@ -826,7 +1012,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 </span>
                                 <i className="fa-solid fa-vault text-gray-200 dark:text-gray-700 text-2xl"></i>
                             </div>
-                            <h4 className="text-xl sm:text-2xl font-black text-gray-800 dark:text-gray-100">{typeof formatRp === 'function' ? formatRp(stats.danaUmum) : stats.danaUmum}</h4>
+                            <h4 className="text-xl sm:text-2xl font-black text-gray-800 dark:text-gray-100">{safeFormatRp(stats.danaUmum)}</h4>
                             <p className="text-xs text-gray-400 mt-1">Hasil dari {stats.totalUmum} kotak umum.</p>
                         </div>
 
@@ -837,7 +1023,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 </span>
                                 <i className="fa-solid fa-piggy-bank text-gray-200 dark:text-gray-700 text-2xl"></i>
                             </div>
-                            <h4 className="text-xl sm:text-2xl font-black text-gray-800 dark:text-gray-100">{typeof formatRp === 'function' ? formatRp(stats.danaPribadi) : stats.danaPribadi}</h4>
+                            <h4 className="text-xl sm:text-2xl font-black text-gray-800 dark:text-gray-100">{safeFormatRp(stats.danaPribadi)}</h4>
                             <p className="text-xs text-gray-400 mt-1">Hasil dari {stats.totalPribadi} kotak pribadi.</p>
                         </div>
 
@@ -1228,7 +1414,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
                         <div className="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500 pt-1 border-t border-gray-50 dark:border-gray-700/50">
                             <span>
-                                Menampilkan <b>{filteredRiwayatPundis.length}</b> transaksi | Total Tersaring: <b className="text-wiz-green dark:text-emerald-400">{typeof formatRp === 'function' ? formatRp(filteredRiwayatPundis.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0)) : filteredRiwayatPundis.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0)}</b>
+                                Menampilkan <b>{filteredRiwayatPundis.length}</b> transaksi | Total Tersaring: <b className="text-wiz-green dark:text-emerald-400">{safeFormatRp(filteredRiwayatPundis.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0))}</b>
                             </span>
                         </div>
                     </div>
@@ -1250,12 +1436,12 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                     .sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0))
                                     .map(r => (
                                         <tr key={r.id} className="hover:bg-wiz-light dark:hover:bg-gray-700/50">
-                                            <td className="px-4 py-3 text-gray-500">{typeof formatDate === 'function' ? formatDate(r.date) : r.date}</td>
+                                            <td className="px-4 py-3 text-gray-500">{safeFormatDate(r.date)}</td>
                                             <td className="px-4 py-3">
                                                 <p className="font-bold text-gray-800 dark:text-gray-100">{r.donorName}</p>
                                                 <p className="text-[11px] text-gray-400">{r.usaha} (No. {r.noUrut})</p>
                                             </td>
-                                            <td className="px-4 py-3 font-bold text-wiz-green dark:text-emerald-400">{typeof formatRp === 'function' ? formatRp(r.amount) : r.amount}</td>
+                                            <td className="px-4 py-3 font-bold text-wiz-green dark:text-emerald-400">{safeFormatRp(r.amount)}</td>
                                             <td className="px-4 py-3 text-center">
                                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.status === 'Berhasil' ? 'bg-wiz-green/10 text-wiz-green dark:text-emerald-400' : r.status === 'Dijemput' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-50 text-red-500'}`}>{r.status}</span>
                                             </td>
@@ -1264,7 +1450,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                                 <div className="flex items-center justify-center gap-2">
                                                     {r.receiptUrl && String(r.receiptUrl).trim() !== '' && (
                                                         <button 
-                                                            onClick={() => setViewImage ? setViewImage({ direct: typeof getDirectImageUrl === 'function' ? getDirectImageUrl(r.receiptUrl) : r.receiptUrl, original: r.receiptUrl }) : window.open(r.receiptUrl, '_blank')}
+                                                            onClick={() => setViewImage ? setViewImage({ direct: safeGetDirectImageUrl(r.receiptUrl), original: r.receiptUrl }) : window.open(r.receiptUrl, '_blank')}
                                                             className="p-1.5 text-gray-400 hover:text-wiz-orange hover:bg-wiz-orange/10 rounded-lg text-xs transition-colors"
                                                             title="Lihat Bukti Foto"
                                                         >
@@ -1302,7 +1488,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 {selectedPundi && selectedPundi.isViewOnly ? (() => {
                     const rawPhone = String(selectedPundi.phone || '').replace(/[^0-9]/g, '');
                     const cleanPhone = rawPhone.startsWith('0') ? '62' + rawPhone.slice(1) : (rawPhone.startsWith('8') ? '62' + rawPhone : rawPhone);
-                    const mapUrls = typeof parseMapUrls === 'function' ? parseMapUrls(selectedPundi.mapUrl) : { navUrl: selectedPundi.mapUrl, webUrl: selectedPundi.mapUrl };
+                    const mapUrls = safeParseMapUrls(selectedPundi.mapUrl);
                     const history = visibleRiwayatPundis.filter(r => String(r.pundiId) === String(selectedPundi.id)).sort((a,b) => new Date(b.date) - new Date(a.date));
                     
                     return (
@@ -1336,8 +1522,8 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                     {history.length === 0 ? <p className="text-xs text-gray-400 italic">Belum ada riwayat.</p> : history.map(r => (
                                         <div key={r.id} className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                                             <div>
-                                                <p className="font-bold text-wiz-green text-sm">{typeof formatRp === 'function' ? formatRp(r.amount) : r.amount}</p>
-                                                <p className="text-[10px] text-gray-500">{typeof formatDate === 'function' ? formatDate(r.date) : r.date}</p>
+                                                <p className="font-bold text-wiz-green text-sm">{safeFormatRp(r.amount)}</p>
+                                                <p className="text-[10px] text-gray-500">{safeFormatDate(r.date)}</p>
                                             </div>
                                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.status === 'Berhasil' ? 'bg-wiz-green/10 text-wiz-green' : 'bg-yellow-100 text-yellow-700'}`}>{r.status}</span>
                                         </div>
@@ -1454,3 +1640,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         </div>
     );
 };
+
+if (typeof window !== 'undefined') {
+    window.PundiView = PundiView;
+}
