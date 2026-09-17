@@ -1,6 +1,6 @@
 // Komponen Manajemen Pundi WIZ (Self-Contained, Bebas Error, Detail Data, Cetak & Scroll Mandiri)
 
-const { useState, useEffect, useMemo, useRef } = React || window.React || {};
+const { useState, useEffect, useMemo, useRef } = window.React;
 
 const formatRp = (num) => {
     if (typeof window.formatRp === 'function') return window.formatRp(num);
