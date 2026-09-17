@@ -158,7 +158,7 @@ const PundiView = ({
         const totalUmum = activeBoxes.filter(p => (p.tipePundi || 'Pundi Umum') === 'Pundi Umum').length;
         const totalPribadi = activeBoxes.filter(p => p.tipePundi === 'Pundi Pribadi').length;
 
-        // Riwayat Penarikan yang sesuai filter periode dashboard
+        // Riwayat Penarikan yang sesuai filter periode dashboard (Konversi aman Number)
         const riwayatPeriode = visibleRiwayatPundis.filter(r => {
             if (!r.date) return false;
             const d = new Date(r.date);
@@ -849,6 +849,7 @@ const PundiView = ({
                 </div>
             )}
 
+            {/* TAB 2: TUGAS PENARIKAN (DENGAN CHECKBOX & SCROLLBAR MANDIRI) */}
             {activeSubTab === 'tugas' && (
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 sm:p-6 animate-in space-y-5">
                     <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-gray-100 dark:border-gray-700 pb-4">
@@ -1063,6 +1064,7 @@ const PundiView = ({
                 </div>
             )}
 
+            {/* TAB 3: DATA MASTER PUNDI (TABEL MANDIRI & LIHAT DATA) */}
             {activeSubTab === 'master' && (
                 <div className="space-y-4 animate-in">
                     <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
@@ -1193,6 +1195,7 @@ const PundiView = ({
                 </div>
             )}
 
+            {/* TAB 4: RIWAYAT SEDEKAH */}
             {activeSubTab === 'riwayat' && (
                 <div className="space-y-4 animate-in">
                     <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
@@ -1282,6 +1285,7 @@ const PundiView = ({
                 </div>
             )}
 
+            {/* MODAL LIHAT DATA DETAIL PUNDI */}
             <SafeModal isOpen={!!detailPundi} onClose={() => setDetailPundi(null)} title={detailPundi ? `Detail Pundi #${detailPundi.noUrut} - ${detailPundi.usaha}` : 'Detail Pundi'}>
                 {detailPundi && (() => {
                     const rawPhone = String(detailPundi.phone || '').replace(/[^0-9]/g, '');
@@ -1371,6 +1375,7 @@ const PundiView = ({
                 })()}
             </SafeModal>
 
+            {/* MODAL DAFTAR PUNDI BELUM DIJEMPUT */}
             <SafeModal isOpen={isBelumDijemputModalOpen} onClose={() => setIsBelumDijemputModalOpen(false)} title={`Pundi Belum Dijemput Periode Ini (${stats.belumDijemputCount})`}>
                 <div className="space-y-3">
                     <p className="text-xs text-gray-500">Berikut daftar kotak pundi aktif yang belum dijemput atau belum dicetak pada periode ini:</p>
@@ -1408,6 +1413,7 @@ const PundiView = ({
                 </div>
             </SafeModal>
 
+            {/* MODAL FORM TAMBAH / EDIT PUNDI */}
             <SafeModal isOpen={isPundiModalOpen} onClose={() => { setIsPundiModalOpen(false); setEditingPundi(null); }} title={editingPundi ? `Edit Pundi #${editingPundi.noUrut}` : 'Tambah Pundi Baru'}>
                 <form onSubmit={handleSavePundiForm} className="space-y-3.5 text-xs">
                     <div>
@@ -1455,7 +1461,7 @@ const PundiView = ({
                 </form>
             </SafeModal>
 
-            {/* Modal Input Laporan Penarikan */}
+            {/* MODAL INPUT LAPORAN PENARIKAN */}
             <SafeModal isOpen={isInputModalOpen} onClose={() => { setIsInputModalOpen(false); setSelectedPundi(null); }} title={selectedPundi ? `Laporan: ${selectedPundi.usaha}` : 'Laporan Penarikan'}>
                 {selectedPundi && (
                     <form onSubmit={submitInputHasil} className="space-y-3.5 text-xs">
@@ -1487,6 +1493,7 @@ const PundiView = ({
                 )}
             </SafeModal>
 
+            {/* MODAL EDIT RIWAYAT PENARIKAN (HITUNG UANG) */}
             <SafeModal isOpen={isEditRiwayatOpen} onClose={() => { setIsEditRiwayatOpen(false); setEditingRiwayat(null); }} title={`Edit Laporan: ${editingRiwayat?.usaha || ''}`}>
                 {editingRiwayat && (
                     <form onSubmit={submitEditRiwayat} className="space-y-3.5 text-xs">
@@ -1518,7 +1525,7 @@ const PundiView = ({
                 )}
             </SafeModal>
 
-            {/* Modal Cetak Stiker QR Pundi */}
+            {/* MODAL CETAK STIKER QR PUNDI */}
             <SafeModal isOpen={!!printQR} onClose={() => setPrintQR(null)} title="Cetak Stiker Pundi">
                 {printQR && (
                     <div className="flex flex-col items-center space-y-4">
