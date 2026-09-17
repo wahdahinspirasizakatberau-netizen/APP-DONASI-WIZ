@@ -1,16 +1,30 @@
-// Komponen Manajemen Pundi WIZ (Dashboard Analitik Sinkron, Tugas Penarikan Interaktif & Scroll Mandiri)
+// Komponen Manajemen Pundi WIZ (Dashboard Sinkron, Tugas Penarikan Interaktif, Detail Data, Cetak & Scroll Mandiri)
 
-const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contacts, programs = [], user, syncDataToSheet, darkMode, setViewImage, amils = [], setActiveTab }) => {
+const { useState, useEffect, useMemo, useRef } = React;
+
+// Fallback aman untuk fungsi global
+const formatRp = window.formatRp || ((num) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num || 0));
+const formatDate = window.formatDate || ((d) => d || '-');
+const parseMapUrls = window.parseMapUrls || ((url) => ({ navUrl: url || '#', webUrl: url || '#' }));
+const getDriveThumbnailUrl = window.getDriveThumbnailUrl || ((url) => url || '');
+
+const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundis, contacts = [], programs = [], user = {}, syncDataToSheet, darkMode, setViewImage, amils = [], setActiveTab }) => {
     const [activeSubTab, setActiveSubTab] = useState('dashboard');
     const [selectedAmilFilter, setSelectedAmilFilter] = useState(user?.role === 'Admin' ? 'Semua' : (user?.name || 'Semua'));
     
+    // Modal input penjemputan & edit riwayat
     const [isInputModalOpen, setIsInputModalOpen] = useState(false);
     const [selectedPundi, setSelectedPundi] = useState(null);
     const [isQuickScanOpen, setIsQuickScanOpen] = useState(false);
     const [printQR, setPrintQR] = useState(null);
-
     const [editingRiwayat, setEditingRiwayat] = useState(null);
     const [isEditRiwayatOpen, setIsEditRiwayatOpen] = useState(false);
+
+    // Modal Lihat Data / Detail Lengkap Pundi
+    const [detailPundi, setDetailPundi] = useState(null);
+
+    // Modal List Khusus Pundi Belum Dijemput dari Dashboard
+    const [isBelumDijemputModalOpen, setIsBelumDijemputModalOpen] = useState(false);
 
     // State Checklist Pilihan Cetak Tugas
     const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
@@ -42,7 +56,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     const yearOptions = Array.from({length: 7}, (_, i) => new Date().getFullYear() - 3 + i);
 
     const isAdmin = user?.role === 'Admin';
-    const effectiveAmil = isAdmin ? selectedAmilFilter : user.name;
+    const effectiveAmil = isAdmin ? selectedAmilFilter : user?.name;
 
     const visiblePundis = useMemo(() => {
         if (isAdmin && effectiveAmil === 'Semua') {
@@ -95,14 +109,14 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
 
-    // Statistik Terpadu Dashboard Analitik (Tersinkron dengan dashMonth & dashYear)
+    // Analitik Tersinkronisasi (Berdasarkan dashMonth & dashYear)
     const stats = useMemo(() => {
         const activeBoxes = visiblePundis.filter(p => p.status === 'Aktif');
         const totalAktif = activeBoxes.length;
         const totalUmum = activeBoxes.filter(p => (p.tipePundi || 'Pundi Umum') === 'Pundi Umum').length;
         const totalPribadi = activeBoxes.filter(p => p.tipePundi === 'Pundi Pribadi').length;
 
-        // Riwayat Penarikan yang cocok dengan bulan/tahun analitik
+        // Riwayat Penarikan yang sesuai filter periode dashboard
         const riwayatPeriode = visibleRiwayatPundis.filter(r => {
             if (!r.date) return false;
             const d = new Date(r.date);
@@ -130,7 +144,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             }
         });
 
-        // Status Kotak pada Periode Terpilih
+        // Status Kotak di Periode Ini
         const pickedUpBoxIds = new Set();
         const inProgressBoxIds = new Set();
 
@@ -145,14 +159,22 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
         const ditarikBerhasilCount = riwayatBerhasil.length;
         const sedangDijemputCount = activeBoxes.filter(p => inProgressBoxIds.has(String(p.id)) || inProgressBoxIds.has(String(p.noUrut))).length;
-        const belumDijemputCount = activeBoxes.filter(p => !pickedUpBoxIds.has(String(p.id)) && !pickedUpBoxIds.has(String(p.noUrut)) && !inProgressBoxIds.has(String(p.id)) && !inProgressBoxIds.has(String(p.noUrut))).length;
-        const gagalCount = riwayatPeriode.filter(r => r.status === 'Gagal').length;
+        
+        // Kotak yang benar-benar belum dijemput (belum berhasil ditarik & belum berstatus dijemput)
+        const pundiBelumDijemputList = activeBoxes.filter(p => 
+            !pickedUpBoxIds.has(String(p.id)) && 
+            !pickedUpBoxIds.has(String(p.noUrut)) && 
+            !inProgressBoxIds.has(String(p.id)) && 
+            !inProgressBoxIds.has(String(p.noUrut))
+        );
+        const belumDijemputCount = pundiBelumDijemputList.length;
 
-        // Target Campaign Bulanan yang Tersinkron
+        // Target Campaign Proporsional
         let targetPeriode = 0;
         if (activePundiCampaign) {
-            // Jika memilih bulan spesifik, tampilkan target bulanan proporsional (atau target penuh jika 1 bulan)
-            targetPeriode = dashMonth === 'Semua' ? Number(activePundiCampaign.target || 0) : Math.round(Number(activePundiCampaign.target || 0) / 12);
+            targetPeriode = dashMonth === 'Semua' 
+                ? Number(activePundiCampaign.target || 0) 
+                : Math.round(Number(activePundiCampaign.target || 0) / 12);
         }
 
         const totalDanaKumulatif = visibleRiwayatPundis.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0);
@@ -167,7 +189,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             ditarikBerhasilCount,
             sedangDijemputCount,
             belumDijemputCount,
-            gagalCount,
+            pundiBelumDijemputList,
             targetPeriode,
             totalDanaKumulatif
         };
@@ -178,7 +200,11 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     // Filter Tugas Penarikan Bulan Ini
     const filteredTugasPundis = useMemo(() => {
         return activePundisSorted.filter(p => {
-            const currentRecord = visibleRiwayatPundis.find(r => String(r.pundiId) === String(p.id) && new Date(r.date).getMonth() === currentMonth && new Date(r.date).getFullYear() === currentYear);
+            const currentRecord = visibleRiwayatPundis.find(r => 
+                String(r.pundiId) === String(p.id) && 
+                new Date(r.date).getMonth() === currentMonth && 
+                new Date(r.date).getFullYear() === currentYear
+            );
             const pStatus = currentRecord ? currentRecord.status : 'Belum';
             
             const term = searchTugas.toLowerCase().trim();
@@ -204,7 +230,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         });
     }, [activePundisSorted, visibleRiwayatPundis, searchTugas, statusTugasFilter, tipeTugasFilter, urutAwal, urutAkhir, currentMonth, currentYear]);
 
-    // Handle Pemilihan / Checkbox Tugas
+    // Handle Checkbox Pilihan Tugas
     const toggleSelectTask = (id) => {
         setSelectedTaskIds(prev => {
             const next = new Set(prev);
@@ -223,7 +249,6 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         }
     };
 
-    // Pundi-pundi yang akan dicetak: Jika ada yang dicentang gunakan yang dicentang, jika tidak gunakan seluruh hasil filter
     const getPundisToPrint = () => {
         if (selectedTaskIds.size > 0) {
             return filteredTugasPundis.filter(p => selectedTaskIds.has(p.id));
@@ -231,7 +256,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         return filteredTugasPundis;
     };
 
-    // Otomatis ubah status menjadi "Dijemput" (Dalam Penjemputan) saat dicetak
+    // Otomatis ubah status pundi menjadi "Dijemput" saat dicetak
     const markPundisAsDijemput = (pundisPrinted) => {
         const todayStr = new Date().toISOString().split('T')[0];
         let newOrUpdatedRiwayat = [...riwayatPundis];
@@ -245,7 +270,6 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             );
 
             if (existingIdx >= 0) {
-                // Jika belum selesai, tandai menjadi Dijemput
                 if (newOrUpdatedRiwayat[existingIdx].status === 'Belum' || !newOrUpdatedRiwayat[existingIdx].status) {
                     newOrUpdatedRiwayat[existingIdx] = {
                         ...newOrUpdatedRiwayat[existingIdx],
@@ -254,7 +278,6 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                     hasChanges = true;
                 }
             } else {
-                // Tambahkan record baru dengan status 'Dijemput'
                 newOrUpdatedRiwayat.push({
                     id: Date.now() + Math.floor(Math.random() * 1000),
                     date: todayStr,
@@ -264,7 +287,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                     usaha: p.usaha,
                     amount: 0,
                     status: 'Dijemput',
-                    amilName: user.name,
+                    amilName: user?.name || 'Amil',
                     notes: 'Dicetak untuk penjemputan kotak',
                     receiptUrl: ''
                 });
@@ -273,16 +296,17 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         });
 
         if (hasChanges) {
+            setPundis && setPundis([...pundis]);
             setRiwayatPundis(newOrUpdatedRiwayat);
-            syncDataToSheet('RiwayatPundi', newOrUpdatedRiwayat);
+            syncDataToSheet && syncDataToSheet('RiwayatPundi', newOrUpdatedRiwayat);
         }
     };
 
+    // Cetak Lembar Checklist Penarikan dengan nomor urut otomatis running (1, 2, 3...)
     const handlePrintChecklist = () => {
         const dataToPrint = getPundisToPrint();
         if (dataToPrint.length === 0) return;
 
-        // Otomatis ubah status menjadi 'Dijemput'
         markPundisAsDijemput(dataToPrint);
 
         const printWindow = window.open('', '_blank');
@@ -314,8 +338,8 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 th { background-color: #27745F; color: #ffffff; font-weight: 800; text-transform: uppercase; font-size: 8.5px; }
                 tr { page-break-inside: avoid; }
                 .text-center { text-align: center; }
-                .running-no { font-weight: bold; color: #475569; width: 4%; }
-                .no-col { font-weight: 900; color: #166534; font-size: 9.5px; background: #f0fdf4; width: 8%; }
+                .running-no { font-weight: bold; color: #475569; width: 5%; }
+                .no-col { font-weight: 900; color: #166534; font-size: 9.5px; background: #f0fdf4; width: 9%; }
                 .check-box { width: 12px; height: 12px; border: 1.2px solid #64748b; display: inline-block; border-radius: 2px; }
                 .footer-wrap { margin-top: 8px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 8.5px; page-break-inside: avoid; }
                 .summary-box { background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px 8px; font-size: 8px; }
@@ -344,10 +368,10 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 <thead>
                     <tr>
                         <th class="text-center" style="width: 5%;">No.</th>
-                        <th class="text-center" style="width: 8%;">ID Pundi</th>
+                        <th class="text-center" style="width: 9%;">ID Pundi</th>
                         <th style="width: 22%;">Nama Usaha / Titik</th>
                         <th style="width: 20%;">Donatur & WA</th>
-                        <th style="width: 24%;">Alamat Titik</th>
+                        <th style="width: 23%;">Alamat Titik</th>
                         <th style="width: 13%;">Nominal (Rp)</th>
                         <th class="text-center" style="width: 8%;">Cek [✓]</th>
                     </tr>
@@ -357,7 +381,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                         <tr>
                             <td class="text-center running-no">${idx + 1}</td>
                             <td class="text-center no-col">#${p.noUrut || '-'}</td>
-                            <td><b style="color: #0f172a;">${p.usaha || '-'}</b> <span style="font-size:7px; color:#6b7280;">(${p.tipePundi === 'Pundi Pribadi' ? 'Pribadi' : 'Umum'})</span></td>
+                            <td><b style="color: #0f172a;">${p.usaha || '-'}</b> <span style="font-size:7.5px; color:#6b7280;">(${p.tipePundi === 'Pundi Pribadi' ? 'Pribadi' : 'Umum'})</span></td>
                             <td>
                                 <div><b>${p.donorName || '-'}</b></div>
                                 <div style="font-size: 7.5px; color: #64748b;">${p.phone || '-'}</div>
@@ -373,7 +397,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             <div class="footer-wrap">
                 <div class="summary-box">
                     <b>Catatan Amil:</b> Pundi telah otomatis berstatus <b>"Dalam Penjemputan"</b> di sistem.<br/>
-                    Setelah uang dihitung di kantor, buka menu Tugas dan klik <b>"Hitung Uang"</b> untuk menyelesaikan.
+                    Setelah kotak dijemput dan uang dihitung di kantor, buka menu Tugas dan klik <b>"Hitung Uang"</b> untuk menyelesaikan.
                 </div>
                 <div class="ttd-block">
                     <p style="margin: 0;">Berau, ${tglCetak}</p>
@@ -390,11 +414,11 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         setTimeout(() => { printWindow.print(); }, 500);
     };
 
+    // Cetak 10 Nota A4 dengan penomoran otomatis
     const handlePrintNotaA4 = () => {
         const dataToPrint = getPundisToPrint();
         if (dataToPrint.length === 0) return;
 
-        // Otomatis ubah status menjadi 'Dijemput'
         markPundisAsDijemput(dataToPrint);
 
         const printWindow = window.open('', '_blank');
@@ -510,19 +534,19 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         if (!isEdit) {
             newData.id = Date.now();
             newData.createdAt = now;
-            newData.createdBy = user.name;
+            newData.createdBy = user?.name || 'Admin';
         }
         const updatedList = isEdit 
             ? pundis.map(p => String(p.id) === String(newData.id) ? newData : p) 
             : [...pundis, newData];
-        setPundis(updatedList);
-        syncDataToSheet('Pundi', updatedList);
+        setPundis && setPundis(updatedList);
+        syncDataToSheet && syncDataToSheet('Pundi', updatedList);
     };
 
     const deletePundi = (row) => {
         const updatedList = pundis.filter(p => String(p.id) !== String(row.id));
-        setPundis(updatedList);
-        syncDataToSheet('Pundi', updatedList);
+        setPundis && setPundis(updatedList);
+        syncDataToSheet && syncDataToSheet('Pundi', updatedList);
     };
 
     const submitInputHasil = (formData) => {
@@ -536,14 +560,19 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             usaha: selectedPundi.usaha,
             amount: Number(formData.amount || 0),
             status: formData.status,
-            amilName: user.name,
+            amilName: user?.name || 'Amil',
             notes: formData.notes || '',
             receiptUrl: formData.receiptUrl || ''
         };
         const updatedRiwayat = [...riwayatPundis, transaction];
-        setRiwayatPundis(updatedRiwayat);
-        syncDataToSheet('RiwayatPundi', updatedRiwayat);
+        setRiwayatPundis && setRiwayatPundis(updatedRiwayat);
+        syncDataToSheet && syncDataToSheet('RiwayatPundi', updatedRiwayat);
         setIsInputModalOpen(false);
+    };
+
+    const handleOpenEditRiwayat = (row) => {
+        setEditingRiwayat(row);
+        setIsEditRiwayatOpen(true);
     };
 
     const saveEditRiwayat = (formData) => {
@@ -558,20 +587,20 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             }
             return r;
         });
-        setRiwayatPundis(updated);
-        syncDataToSheet('RiwayatPundi', updated);
+        setRiwayatPundis && setRiwayatPundis(updated);
+        syncDataToSheet && syncDataToSheet('RiwayatPundi', updated);
         setIsEditRiwayatOpen(false);
         setEditingRiwayat(null);
     };
 
     const deleteRiwayat = (row) => {
         const updated = riwayatPundis.filter(r => String(r.id) !== String(row.id));
-        setRiwayatPundis(updated);
-        syncDataToSheet('RiwayatPundi', updated);
+        setRiwayatPundis && setRiwayatPundis(updated);
+        syncDataToSheet && syncDataToSheet('RiwayatPundi', updated);
     };
 
     return (
-        <div className="space-y-6 slide-up relative pb-20 lg:pb-8">
+        <div className="space-y-6 slide-up relative pb-24 lg:pb-10">
             {/* Header Manajemen Pundi */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
@@ -624,7 +653,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 </div>
             </div>
 
-            {/* Menu Navigasi Sub-Tab Pundi */}
+            {/* Sub-Tab Navigasi Pundi */}
             <div className="flex overflow-x-auto gap-2 bg-white dark:bg-gray-800 p-1.5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm w-full hide-scrollbar">
                 {[
                     { id: 'dashboard', label: 'Dashboard Analitik', icon: 'fa-chart-pie' },
@@ -639,16 +668,16 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 ))}
             </div>
 
-            {/* SUBTAB 1: DASHBOARD ANALITIK (TERSINKRON RINCI) */}
+            {/* SUBTAB 1: DASHBOARD ANALITIK TERSINKRON */}
             {activeSubTab === 'dashboard' && (
                 <div className="space-y-6 animate-in">
-                    {/* Bar Filter Periode Dashboard */}
+                    {/* Bar Filter Periode */}
                     <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <div>
                             <h3 className="font-bold text-gray-800 dark:text-gray-100 text-sm flex items-center gap-2">
                                 <i className="fa-solid fa-calendar-check text-wiz-green"></i> Filter Periode Analitik
                             </h3>
-                            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Semua data target, perolehan Pundi Umum/Pribadi, dan status penjemputan otomatis tersinkron.</p>
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Target, perolehan Pundi Umum/Pribadi, dan status jemput otomatis tersinkron.</p>
                         </div>
                         <div className="flex items-center gap-2 w-full sm:w-auto">
                             <select 
@@ -669,7 +698,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                         </div>
                     </div>
 
-                    {/* Banner Target & Perolehan Tersinkron */}
+                    {/* Banner Target & Capaian Tersinkron */}
                     <div className="p-6 bg-gradient-to-r from-wiz-green_dark via-wiz-green to-teal-700 rounded-3xl text-white shadow-xl relative overflow-hidden">
                         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
                             <div>
@@ -677,7 +706,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                     <i className="fa-solid fa-bullseye"></i> Capaian Periode: {dashMonth === 'Semua' ? `Tahun ${dashYear}` : `${monthNames[dashMonth]} ${dashYear}`}
                                 </span>
                                 <h3 className="text-2xl sm:text-3xl font-black">{formatRp(stats.totalDanaBulanIni)}</h3>
-                                <p className="text-white/80 text-xs mt-1">Total donasi pundi terkumpul pada periode ini.</p>
+                                <p className="text-white/80 text-xs mt-1">Total donasi pundi berhasil terkumpul pada periode ini.</p>
                             </div>
 
                             {stats.targetPeriode > 0 && (
@@ -698,10 +727,9 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                         </div>
                     </div>
 
-                    {/* Grid Rincian Nominal Terkumpul (Umum & Pribadi) & Status Jemput */}
+                    {/* Grid Nominal Terkumpul (Umum & Pribadi) & Status Jemput */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                        {/* Nominal Pundi Umum */}
-                        <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm relative overflow-hidden">
+                        <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
                             <div className="flex items-center justify-between mb-2">
                                 <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-md">
                                     <i className="fa-solid fa-store mr-1"></i> Pundi Umum
@@ -709,11 +737,10 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 <i className="fa-solid fa-vault text-gray-200 dark:text-gray-700 text-2xl"></i>
                             </div>
                             <h4 className="text-2xl font-black text-gray-800 dark:text-gray-100">{formatRp(stats.danaUmum)}</h4>
-                            <p className="text-xs text-gray-400 mt-1">Dari total {stats.totalUmum} kotak umum terdaftar</p>
+                            <p className="text-xs text-gray-400 mt-1">Terkumpul dari {stats.totalUmum} kotak umum</p>
                         </div>
 
-                        {/* Nominal Pundi Pribadi */}
-                        <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm relative overflow-hidden">
+                        <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
                             <div className="flex items-center justify-between mb-2">
                                 <span className="text-[11px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-md">
                                     <i className="fa-solid fa-house-user mr-1"></i> Pundi Pribadi
@@ -721,26 +748,33 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 <i className="fa-solid fa-piggy-bank text-gray-200 dark:text-gray-700 text-2xl"></i>
                             </div>
                             <h4 className="text-2xl font-black text-gray-800 dark:text-gray-100">{formatRp(stats.danaPribadi)}</h4>
-                            <p className="text-xs text-gray-400 mt-1">Dari total {stats.totalPribadi} kotak pribadi terdaftar</p>
+                            <p className="text-xs text-gray-400 mt-1">Terkumpul dari {stats.totalPribadi} kotak pribadi</p>
                         </div>
 
-                        {/* Kotak Belum Dijemput */}
-                        <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-amber-200 dark:border-amber-800/50 shadow-sm relative overflow-hidden bg-gradient-to-br from-amber-50/40 to-transparent dark:from-amber-950/20">
+                        {/* Kartu Pundi Belum Dijemput (Bisa diklik untuk LIHAT DATA) */}
+                        <div 
+                            onClick={() => setIsBelumDijemputModalOpen(true)}
+                            className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-amber-200 dark:border-amber-800/50 shadow-sm cursor-pointer hover:shadow-md hover:border-amber-400 transition-all bg-gradient-to-br from-amber-50/40 to-transparent dark:from-amber-950/20 group"
+                            title="Klik untuk melihat daftar kotak pundi yang belum dijemput"
+                        >
                             <div className="flex items-center justify-between mb-2">
                                 <span className="text-[11px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-100/80 dark:bg-amber-900/40 px-2 py-0.5 rounded-md">
                                     <i className="fa-solid fa-clock mr-1"></i> Belum Dijemput
                                 </span>
-                                <i className="fa-solid fa-box text-amber-200 dark:text-amber-800 text-2xl"></i>
+                                <span className="text-xs text-amber-500 font-bold group-hover:underline flex items-center gap-1">
+                                    Lihat Data <i className="fa-solid fa-arrow-right text-[10px]"></i>
+                                </span>
                             </div>
-                            <h4 className="text-2xl font-black text-amber-600 dark:text-amber-400">{stats.belumDijemputCount} <span className="text-sm font-semibold text-gray-500">Kotak</span></h4>
-                            <p className="text-xs text-gray-400 mt-1">Belum dikunjungi / belum dicetak periode ini</p>
+                            <h4 className="text-2xl font-black text-amber-600 dark:text-amber-400">
+                                {stats.belumDijemputCount} <span className="text-sm font-semibold text-gray-500">Kotak</span>
+                            </h4>
+                            <p className="text-[11px] text-gray-400 mt-1">Belum dikunjungi / belum dicetak periode ini</p>
                         </div>
 
-                        {/* Sedang Dalam Penjemputan / Selesai */}
-                        <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm relative overflow-hidden">
+                        <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
                             <div className="flex items-center justify-between mb-2">
                                 <span className="text-[11px] font-bold uppercase tracking-wider text-wiz-green dark:text-emerald-400 bg-wiz-green/10 px-2 py-0.5 rounded-md">
-                                    <i className="fa-solid fa-truck mr-1"></i> Progress Jemput
+                                    <i className="fa-solid fa-truck mr-1"></i> Progress Lapangan
                                 </span>
                                 <i className="fa-solid fa-circle-check text-gray-200 dark:text-gray-700 text-2xl"></i>
                             </div>
@@ -755,32 +789,31 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                     <span className="text-lg font-black">{stats.ditarikBerhasilCount}</span>
                                 </div>
                             </div>
-                            <p className="text-[11px] text-gray-400 mt-2">Kotak yang sudah berjalan di lapangan</p>
+                            <p className="text-[11px] text-gray-400 mt-2">Kotak yang sedang & telah dijemput</p>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* SUBTAB 2: TUGAS PENARIKAN (INTERAKTIF DENGAN CHECKBOX & SCROLL MANDIRI) */}
+            {/* SUBTAB 2: TUGAS PENARIKAN (CHECKBOX, AUTO DIJEMPUT, LIHAT DATA, SCROLL MANDIRI) */}
             {activeSubTab === 'tugas' && (
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 sm:p-6 animate-in space-y-5">
-                    {/* Header Bar Tugas & Tombol Cetak Pilihan */}
+                    {/* Header Bar & Tombol Cetak */}
                     <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-gray-100 dark:border-gray-700 pb-4">
                         <div>
                             <div className="flex items-center gap-2 flex-wrap">
                                 <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Antrean Penarikan Bulan Ini</h3>
                                 {selectedTaskIds.size > 0 && (
                                     <span className="px-2.5 py-0.5 bg-wiz-green text-white text-xs font-bold rounded-lg shadow-sm">
-                                        {selectedTaskIds.size} Pundi Dipilih
+                                        {selectedTaskIds.size} Pundi Ditandai
                                     </span>
                                 )}
                             </div>
                             <p className="text-xs text-gray-500 mt-1">
-                                Pilih pundi yang mau dicetak hari ini. Saat dicetak, sistem akan <b>otomatis menandai statusnya "Dijemput"</b>.
+                                Tandai pundi yang ingin dicetak. Saat dicetak, sistem otomatis menandai statusnya <b>"Dalam Penjemputan" (Dijemput)</b>.
                             </p>
                         </div>
 
-                        {/* Tombol Cetak & Aksi */}
                         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                             <button
                                 type="button"
@@ -788,7 +821,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 className="px-3 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
                             >
                                 <i className={`fa-solid ${selectedTaskIds.size === filteredTugasPundis.length && filteredTugasPundis.length > 0 ? 'fa-square-check text-wiz-green' : 'fa-square'}`}></i>
-                                <span>{selectedTaskIds.size === filteredTugasPundis.length && filteredTugasPundis.length > 0 ? 'Batal Pilih Semua' : 'Pilih Semua Hasil Filter'}</span>
+                                <span>{selectedTaskIds.size === filteredTugasPundis.length && filteredTugasPundis.length > 0 ? 'Batal Pilih Semua' : 'Pilih Semua'}</span>
                             </button>
 
                             <Button 
@@ -834,12 +867,11 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-start sm:justify-end">
-                            {/* Filter Status Penjemputan */}
                             <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-600 p-0.5 bg-white dark:bg-gray-800 shadow-sm text-xs">
                                 {[
                                     { id: 'Semua', label: 'Semua' },
-                                    { id: 'Belum', label: 'Belum Dijemput' },
-                                    { id: 'Dijemput', label: 'Dalam Penjemputan' },
+                                    { id: 'Belum', label: 'Belum' },
+                                    { id: 'Dijemput', label: 'Dijemput' },
                                     { id: 'Sudah Ditarik', label: 'Selesai' }
                                 ].map(item => (
                                     <button
@@ -853,7 +885,6 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 ))}
                             </div>
 
-                            {/* Filter Tipe Pundi */}
                             <select
                                 value={tipeTugasFilter}
                                 onChange={(e) => setTipeTugasFilter(e.target.value)}
@@ -866,15 +897,15 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                         </div>
                     </div>
 
-                    {/* AREA KONTEN TUGAS PENARIKAN (SCROLL MANDIRI DI ATAS NAVBAR BAWAH) */}
-                    <div className="max-h-[62vh] sm:max-h-[68vh] overflow-y-auto pr-1 sm:pr-2 custom-scrollbar space-y-3 pb-8">
+                    {/* KONTEN TUGAS PENARIKAN: SCROLL MANDIRI DI ATAS MENU BAWAH */}
+                    <div className="max-h-[60vh] sm:max-h-[66vh] overflow-y-auto pr-1 sm:pr-2 custom-scrollbar space-y-3 pb-8">
                         {filteredTugasPundis.length === 0 ? (
                             <div className="p-8 text-center text-gray-400 bg-gray-50 dark:bg-gray-700/30 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 text-xs">
                                 <i className="fa-solid fa-clipboard-check text-3xl mb-2 text-gray-300"></i>
                                 <p>Tidak ada pundi yang cocok dengan filter tugas saat ini.</p>
                             </div>
                         ) : (
-                            filteredTugasPundis.map((p, idx) => {
+                            filteredTugasPundis.map((p) => {
                                 const currentRecord = visibleRiwayatPundis.find(r => 
                                     String(r.pundiId) === String(p.id) && 
                                     new Date(r.date).getMonth() === currentMonth && 
@@ -896,7 +927,6 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                                 : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 hover:border-wiz-green/30'
                                         }`}
                                     >
-                                        {/* Checkbox & Identitas Pundi */}
                                         <div className="flex items-start gap-3 flex-1">
                                             <input 
                                                 type="checkbox"
@@ -908,14 +938,13 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                             <div className="space-y-1 flex-1">
                                                 <div className="flex items-center gap-2 flex-wrap">
                                                     <span className="text-[10px] font-bold text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">
-                                                        No. Urut: #{p.noUrut}
+                                                        #{p.noUrut}
                                                     </span>
                                                     <h4 className="font-bold text-gray-800 dark:text-gray-100 text-sm">{p.usaha}</h4>
                                                     <span className={`px-2 py-0.2 rounded text-[10px] font-bold ${p.tipePundi === 'Pundi Pribadi' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'}`}>
                                                         {p.tipePundi || 'Pundi Umum'}
                                                     </span>
                                                     
-                                                    {/* Badge Status Dinamis */}
                                                     {tStatus === 'Berhasil' ? (
                                                         <span className="px-2 py-0.5 bg-wiz-green text-white text-[10px] font-bold rounded-md">
                                                             <i className="fa-solid fa-check mr-1"></i> Selesai ({formatRp(currentRecord.amount)})
@@ -937,8 +966,17 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                             </div>
                                         </div>
 
-                                        {/* Tombol Aksi Penjemputan & Hitung Uang */}
+                                        {/* Tombol Aksi: Lihat Data, Jemput, Hitung Uang */}
                                         <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                                            <button
+                                                type="button"
+                                                onClick={() => setDetailPundi(p)}
+                                                className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1"
+                                                title="Lihat Rincian Data Pundi"
+                                            >
+                                                <i className="fa-solid fa-eye text-wiz-orange"></i> Lihat Data
+                                            </button>
+
                                             {tStatus === 'Dijemput' ? (
                                                 <button 
                                                     type="button"
@@ -973,7 +1011,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 </div>
             )}
 
-            {/* SUBTAB 3: DATA MASTER PUNDI */}
+            {/* SUBTAB 3: DATA MASTER PUNDI (DENGAN TOMBOL LIHAT DATA & SCROLL MANDIRI) */}
             {activeSubTab === 'master' && (
                 <div className="space-y-4 animate-in">
                     <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
@@ -1015,7 +1053,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                         </div>
                     </div>
 
-                    <div className="max-h-[65vh] overflow-y-auto pr-1 custom-scrollbar pb-8">
+                    <div className="max-h-[62vh] overflow-y-auto pr-1 custom-scrollbar pb-8">
                         <ModuleView 
                             title="Data Kotak Pundi" 
                             data={visiblePundis.filter(p => {
@@ -1030,7 +1068,17 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 { key: 'usaha', label: 'Nama Usaha / Lokasi', render: r => <div><p className="font-bold">{r.usaha}</p><p className="text-xs text-gray-400">{r.donorName} ({r.tipePundi || 'Pundi Umum'})</p></div> },
                                 { key: 'alamat', label: 'Alamat Pundi' },
                                 { key: 'status', label: 'Status', render: r => <span className={`px-2 py-1 rounded text-xs font-bold ${r.status === 'Aktif' ? 'bg-wiz-green/10 text-wiz-green' : 'bg-red-50 text-red-500'}`}>{r.status}</span> },
-                                { key: 'print', label: 'Stiker QR', render: r => (
+                                { key: 'action_view', label: 'Rincian', render: r => (
+                                    <button 
+                                        type="button" 
+                                        onClick={() => setDetailPundi(r)} 
+                                        className="p-2 text-wiz-green hover:bg-wiz-green/10 rounded-lg text-xs font-bold flex items-center gap-1"
+                                        title="Buka Lembar Detail Pundi"
+                                    >
+                                        <i className="fa-solid fa-eye text-sm"></i> Lihat
+                                    </button>
+                                )},
+                                { key: 'print', label: 'QR', render: r => (
                                     <button onClick={() => setPrintQR(r)} className="p-2 text-wiz-orange hover:bg-wiz-orange/10 rounded-lg" title="Cetak Stiker">
                                         <i className="fa-solid fa-qrcode text-lg"></i>
                                     </button>
@@ -1058,7 +1106,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             {/* SUBTAB 4: RIWAYAT SEDEKAH */}
             {activeSubTab === 'riwayat' && (
                 <div className="space-y-4 animate-in">
-                    <div className="max-h-[65vh] overflow-y-auto pr-1 custom-scrollbar pb-8">
+                    <div className="max-h-[62vh] overflow-y-auto pr-1 custom-scrollbar pb-8">
                         <Table 
                             columns={[
                                 { key: 'date', label: 'Tanggal', render: r => formatDate(r.date) },
@@ -1076,7 +1124,135 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 </div>
             )}
 
-            {/* MODAL INPUT HASIL PENARIKAN */}
+            {/* MODAL 1: LIHAT DATA DETAIL LENGKAP PUNDI */}
+            <Modal isOpen={!!detailPundi} onClose={() => setDetailPundi(null)} title={detailPundi ? `Detail Pundi #${detailPundi.noUrut} - ${detailPundi.usaha}` : 'Detail Pundi'}>
+                {detailPundi && (() => {
+                    const rawPhone = String(detailPundi.phone || '').replace(/[^0-9]/g, '');
+                    const cleanPhone = rawPhone.startsWith('0') ? '62' + rawPhone.slice(1) : (rawPhone.startsWith('8') ? '62' + rawPhone : rawPhone);
+                    const mapUrls = parseMapUrls(detailPundi.mapUrl);
+                    const riwayatPundiIni = visibleRiwayatPundis.filter(r => String(r.pundiId) === String(detailPundi.id) || String(r.noUrut) === String(detailPundi.noUrut)).sort((a, b) => new Date(b.date) - new Date(a.date));
+
+                    return (
+                        <div className="space-y-4 text-xs">
+                            <div className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-2xl space-y-3">
+                                <div className="flex justify-between items-center border-b border-gray-200 dark:border-gray-600 pb-2">
+                                    <span className="text-gray-400 font-bold uppercase">Nomor Registrasi:</span>
+                                    <span className="text-base font-black text-wiz-green">#{detailPundi.noUrut}</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-gray-400 font-semibold">Jenis Pundi:</span>
+                                    <span className={`px-2 py-0.5 rounded font-bold ${detailPundi.tipePundi === 'Pundi Pribadi' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{detailPundi.tipePundi || 'Pundi Umum'}</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-gray-400 font-semibold">Nama Donatur:</span>
+                                    <span className="font-bold text-gray-800 dark:text-gray-100">{detailPundi.donorName}</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-gray-400 font-semibold">Nama Usaha/Titik:</span>
+                                    <span className="font-bold text-gray-800 dark:text-gray-100">{detailPundi.usaha}</span>
+                                </div>
+                                <div className="space-y-1">
+                                    <span className="text-gray-400 font-semibold">Alamat Lengkap:</span>
+                                    <p className="text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 p-2.5 rounded-xl border border-gray-200 dark:border-gray-600">{detailPundi.alamat || '-'}</p>
+                                </div>
+                            </div>
+
+                            {/* Tombol Akses Cepat: WhatsApp & Navigasi Maps */}
+                            <div className="grid grid-cols-2 gap-2">
+                                {cleanPhone ? (
+                                    <a
+                                        href={`https://wa.me/${cleanPhone}?text=Assalamu'alaikum%20Bapak/Ibu%20${encodeURIComponent(detailPundi.donorName)},%20kami%20dari%20petugas%20WIZ%20Berau%20terkait%20kotak%20pundi...`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="py-2.5 px-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all text-center"
+                                    >
+                                        <i className="fa-brands fa-whatsapp text-sm"></i> Chat WA
+                                    </a>
+                                ) : (
+                                    <div className="py-2.5 px-3 bg-gray-100 text-gray-400 rounded-xl text-center">No WA (-)</div>
+                                )}
+
+                                {detailPundi.mapUrl ? (
+                                    <a
+                                        href={mapUrls.navUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="py-2.5 px-3 bg-wiz-green hover:bg-wiz-green_dark text-white font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all text-center"
+                                    >
+                                        <i className="fa-solid fa-location-arrow"></i> Rute Maps
+                                    </a>
+                                ) : (
+                                    <div className="py-2.5 px-3 bg-gray-100 text-gray-400 rounded-xl text-center">GPS (-)</div>
+                                )}
+                            </div>
+
+                            {/* Riwayat Penarikan Kotak Ini */}
+                            <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                                <h5 className="font-bold text-gray-700 dark:text-gray-200 text-xs">Riwayat Penarikan Kotak Ini ({riwayatPundiIni.length})</h5>
+                                <div className="max-h-36 overflow-y-auto space-y-1.5 custom-scrollbar pr-1">
+                                    {riwayatPundiIni.length === 0 ? (
+                                        <p className="text-gray-400 italic">Belum ada riwayat penarikan yang tercatat.</p>
+                                    ) : (
+                                        riwayatPundiIni.map((r, i) => (
+                                            <div key={i} className="flex justify-between items-center p-2 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg">
+                                                <div>
+                                                    <p className="font-bold text-wiz-green">{formatRp(r.amount)}</p>
+                                                    <p className="text-[10px] text-gray-400">{formatDate(r.date)} • Amil: {r.amilName}</p>
+                                                </div>
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.status === 'Berhasil' ? 'bg-wiz-green/10 text-wiz-green' : 'bg-yellow-100 text-yellow-700'}`}>{r.status}</span>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end pt-2">
+                                <Button variant="secondary" onClick={() => setDetailPundi(null)}>Tutup</Button>
+                            </div>
+                        </div>
+                    );
+                })()}
+            </Modal>
+
+            {/* MODAL 2: DAFTAR PUNDI BELUM DIJEMPUT (DARI KLIK KARTU DASHBOARD) */}
+            <Modal isOpen={isBelumDijemputModalOpen} onClose={() => setIsBelumDijemputModalOpen(false)} title={`Pundi Belum Dijemput Periode Ini (${stats.belumDijemputCount})`}>
+                <div className="space-y-3">
+                    <p className="text-xs text-gray-500">Berikut daftar kotak pundi aktif yang belum dijemput atau belum dicetak pada periode ini:</p>
+                    <div className="max-h-[50vh] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                        {stats.belumDijemputCount === 0 ? (
+                            <div className="p-6 text-center text-gray-400 bg-gray-50 dark:bg-gray-700/30 rounded-xl text-xs">
+                                <i className="fa-solid fa-circle-check text-wiz-green text-2xl mb-1"></i>
+                                <p>Alhamdulillah, semua pundi aktif pada periode ini sudah dalam proses penjemputan atau berhasil ditarik.</p>
+                            </div>
+                        ) : (
+                            stats.pundiBelumDijemputList.map((p) => (
+                                <div key={p.id} className="p-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl flex items-center justify-between gap-2">
+                                    <div>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="font-bold text-wiz-green text-xs">#{p.noUrut}</span>
+                                            <span className="font-bold text-gray-800 dark:text-gray-100 text-xs">{p.usaha}</span>
+                                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-gray-100 text-gray-600">{p.tipePundi || 'Umum'}</span>
+                                        </div>
+                                        <p className="text-[11px] text-gray-400 mt-0.5">{p.donorName} • {p.alamat}</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setDetailPundi(p); setIsBelumDijemputModalOpen(false); }}
+                                        className="px-2.5 py-1.5 bg-wiz-green/10 hover:bg-wiz-green text-wiz-green hover:text-white rounded-lg text-xs font-bold transition-all shrink-0"
+                                    >
+                                        Lihat Data
+                                    </button>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                    <div className="flex justify-end pt-2 border-t border-gray-100 dark:border-gray-700">
+                        <Button variant="secondary" onClick={() => setIsBelumDijemputModalOpen(false)}>Tutup</Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* MODAL 3: INPUT LAPORAN PENJEMPUTAN */}
             <Modal isOpen={isInputModalOpen} onClose={() => { setIsInputModalOpen(false); setSelectedPundi(null); }} title={selectedPundi ? `Laporan Penarikan: ${selectedPundi.usaha}` : 'Laporan Penarikan'}>
                 {selectedPundi && (
                     <DynamicForm 
@@ -1097,7 +1273,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 )}
             </Modal>
 
-            {/* MODAL EDIT HASIL RIWAYAT */}
+            {/* MODAL 4: EDIT LAPORAN RIWAYAT */}
             <Modal isOpen={isEditRiwayatOpen} onClose={() => { setIsEditRiwayatOpen(false); setEditingRiwayat(null); }} title={`Edit Laporan: ${editingRiwayat?.usaha || ''}`}>
                 {editingRiwayat && (
                     <DynamicForm 
@@ -1115,7 +1291,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 )}
             </Modal>
 
-            {/* MODAL CETAK STIKER QR PUNDI */}
+            {/* MODAL 5: CETAK STIKER QR PUNDI */}
             <Modal isOpen={!!printQR} onClose={() => setPrintQR(null)} title="Cetak Stiker Pundi">
                 {printQR && (
                     <div className="flex flex-col items-center space-y-4">
@@ -1154,3 +1330,6 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         </div>
     );
 };
+
+// Pasang ke objek window global agar tidak ada kendala antar file script
+window.PundiView = PundiView;
