@@ -1,4 +1,6 @@
-// Controller Utama Aplikasi CRM WIZ Berau (Versi Cepat & Filter Akses Amil)
+// Controller Utama Aplikasi CRM WIZ Berau (Autentikasi Cepat & Penyaringan Data Amil vs Admin)
+
+const { useState, useEffect, useMemo, useRef } = React;
 
 const App = () => {
     const safeGetJSON = (key, fallback) => {
@@ -21,8 +23,6 @@ const App = () => {
     };
 
     const [user, setUser] = useState(() => safeGetJSON('wiz_user_session', null));
-    // Dibuat false agar aplikasi terbuka instan (<0.5 detik) tanpa menunggu server awan
-    const [isInitializing, setIsInitializing] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isOfflineMode, setIsOfflineMode] = useState(false);
     const [activeTab, setActiveTab] = useState('dashboard');
@@ -41,24 +41,14 @@ const App = () => {
     const [deletePrompt, setDeletePrompt] = useState(null);
     const [viewImage, setViewImage] = useState(null);
 
-    const [amils, setAmils] = useState(() => safeGetJSON('wiz_cache_Amil', typeof fallbackAmils !== 'undefined' ? fallbackAmils : []));
+    // Muat data dari cache lokal untuk membuka aplikasi seketika (< 0.5 detik)
+    const [amils, setAmils] = useState(() => safeGetJSON('wiz_cache_Amil', typeof fallbackAmils !== 'undefined' ? fallbackAmils : (typeof window !== 'undefined' && window.fallbackAmils ? window.fallbackAmils : [])));
     const [contacts, setContacts] = useState(() => safeGetJSON('wiz_cache_Kontak', []));
     const [programs, setPrograms] = useState(() => safeGetJSON('wiz_cache_Program', []));
     const [donations, setDonations] = useState(() => safeGetJSON('wiz_cache_Donasi', []));
     const [tasks, setTasks] = useState(() => safeGetJSON('wiz_cache_Tugas', []));
-    
     const [pundis, setPundis] = useState(() => safeGetJSON('wiz_cache_Pundi', []));
     const [riwayatPundis, setRiwayatPundis] = useState(() => safeGetJSON('wiz_cache_RiwayatPundi', []));
-
-    const [selectedCampaignBreakdown, setSelectedCampaignBreakdown] = useState(null);
-    const [campaignSubTab, setCampaignSubTab] = useState('campaigns');
-
-    // State Filter Periode & Kategori Campaign WIZ
-    const [campaignMonth, setCampaignMonth] = useState(() => new Date().getMonth());
-    const [campaignYear, setCampaignYear] = useState(() => new Date().getFullYear());
-    const [campaignCategoryFilter, setCampaignCategoryFilter] = useState('Semua');
-    const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-    const yearOptions = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 3 + i);
 
     useEffect(() => {
         if (darkMode) {
@@ -70,14 +60,18 @@ const App = () => {
         }
     }, [darkMode]);
 
+    // Sinkronisasi data latar belakang dari Google Apps Script
     const fetchAllData = async (isManualRefresh = false) => {
         if (isManualRefresh) setIsRefreshing(true);
         try {
-            const res = await fetch(API_URL);
+            const targetUrl = typeof API_URL !== 'undefined' ? API_URL : (typeof window !== 'undefined' ? window.API_URL : '');
+            if (!targetUrl) return;
+
+            const res = await fetch(targetUrl);
             const result = await res.json();
             if (result.status === 'success' && result.data) {
                 const d = result.data;
-                if (d.Amil?.length > 0) {
+                if (Array.isArray(d.Amil) && d.Amil.length > 0) {
                     setAmils(d.Amil);
                     safeSetJSON('wiz_cache_Amil', d.Amil);
                     
@@ -104,24 +98,58 @@ const App = () => {
                 setIsOfflineMode(true); 
             }
         } catch (err) {
+            console.error("Gagal sinkron data awan:", err);
             setIsOfflineMode(true);
         } finally {
-            setIsInitializing(false);
             setIsRefreshing(false);
         }
     };
 
     useEffect(() => { fetchAllData(); }, []);
 
-    const handleLogin = (email, password, setError) => {
+    // Autentikasi Cerdas: Cek di memori lokal, jika belum ada langsung fetch dari server online
+    const handleLogin = async (email, password, setError) => {
         const cleanEmail = String(email || '').trim().toLowerCase();
         const cleanPassword = String(password || '').trim();
 
-        const foundUser = amils.find(a => {
+        let currentAmils = Array.isArray(amils) && amils.length > 0 ? amils : (typeof window !== 'undefined' && window.fallbackAmils ? window.fallbackAmils : []);
+
+        let foundUser = currentAmils.find(a => {
             const amilEmail = String(a.email || '').trim().toLowerCase();
             const amilPass = String(a.password || '').trim();
             return amilEmail === cleanEmail && amilPass === cleanPassword;
         });
+
+        // Jika tidak ditemukan di data cache, ambil langsung dari server Google Sheets secara instan
+        if (!foundUser) {
+            try {
+                const targetUrl = typeof API_URL !== 'undefined' ? API_URL : (typeof window !== 'undefined' ? window.API_URL : '');
+                if (targetUrl) {
+                    const res = await fetch(targetUrl);
+                    const result = await res.json();
+                    if (result.status === 'success' && result.data && Array.isArray(result.data.Amil)) {
+                        currentAmils = result.data.Amil;
+                        setAmils(currentAmils);
+                        safeSetJSON('wiz_cache_Amil', currentAmils);
+
+                        if (result.data.Kontak) { setContacts(result.data.Kontak); safeSetJSON('wiz_cache_Kontak', result.data.Kontak); }
+                        if (result.data.Program) { setPrograms(result.data.Program); safeSetJSON('wiz_cache_Program', result.data.Program); }
+                        if (result.data.Donasi) { setDonations(result.data.Donasi); safeSetJSON('wiz_cache_Donasi', result.data.Donasi); }
+                        if (result.data.Tugas) { setTasks(result.data.Tugas); safeSetJSON('wiz_cache_Tugas', result.data.Tugas); }
+                        if (result.data.Pundi) { setPundis(result.data.Pundi); safeSetJSON('wiz_cache_Pundi', result.data.Pundi); }
+                        if (result.data.RiwayatPundi) { setRiwayatPundis(result.data.RiwayatPundi); safeSetJSON('wiz_cache_RiwayatPundi', result.data.RiwayatPundi); }
+
+                        foundUser = currentAmils.find(a => {
+                            const amilEmail = String(a.email || '').trim().toLowerCase();
+                            const amilPass = String(a.password || '').trim();
+                            return amilEmail === cleanEmail && amilPass === cleanPassword;
+                        });
+                    }
+                }
+            } catch (err) {
+                console.error("Gagal verifikasi online:", err);
+            }
+        }
 
         if (foundUser) {
             if (String(foundUser.status || '').trim().toLowerCase() !== 'aktif') {
@@ -132,7 +160,7 @@ const App = () => {
             setUser(foundUser);
             setError('');
         } else {
-            setError('Kredensial tidak valid. Pastikan email dan sandi benar.');
+            setError('Email atau kata sandi tidak cocok. Pastikan data akun benar.');
         }
     };
 
@@ -145,7 +173,10 @@ const App = () => {
     const syncDataToSheet = async (sheetName, newData) => {
         safeSetJSON('wiz_cache_' + sheetName, newData);
         try {
-            await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'syncData', sheetName, data: newData }) });
+            const targetUrl = typeof API_URL !== 'undefined' ? API_URL : (typeof window !== 'undefined' ? window.API_URL : '');
+            if (targetUrl) {
+                await fetch(targetUrl, { method: 'POST', body: JSON.stringify({ action: 'syncData', sheetName, data: newData }) });
+            }
         } catch(err) { setIsOfflineMode(true); }
     };
 
@@ -195,137 +226,83 @@ const App = () => {
     };
 
     const isAdmin = user?.role === 'Admin';
+    const currentUserName = user?.name || '';
 
-    // Filter Data: Admin melihat semua, Amil hanya melihat data miliknya sendiri
+    /* =========================================================================
+       PENYARINGAN DATA KETAT:
+       - JIKA ADMIN: Melihat seluruh data kolektif (Semua Amil).
+       - JIKA AMIL BIASA: Hanya melihat data miliknya sendiri (Pundi, Donasi, Kontak, Tugas).
+       ========================================================================= */
     const visibleContacts = useMemo(() => {
         if (isAdmin) return contacts;
-        return contacts.filter(c => c.createdBy === user?.name);
-    }, [contacts, isAdmin, user]);
+        return (contacts || []).filter(c => c.createdBy === currentUserName);
+    }, [contacts, isAdmin, currentUserName]);
 
     const visibleDonations = useMemo(() => {
         if (isAdmin) return donations;
-        return donations.filter(d => d.amilName === user?.name);
-    }, [donations, isAdmin, user]);
+        return (donations || []).filter(d => d.amilName === currentUserName);
+    }, [donations, isAdmin, currentUserName]);
 
     const visibleTasks = useMemo(() => {
         if (isAdmin) return tasks;
-        return tasks.filter(t => t.assignedTo === user?.name);
-    }, [tasks, isAdmin, user]);
+        return (tasks || []).filter(t => t.assignedTo === currentUserName);
+    }, [tasks, isAdmin, currentUserName]);
 
     const visiblePundis = useMemo(() => {
         if (isAdmin) return pundis;
-        return pundis.filter(p => {
-            const creator = p.createdBy || contacts.find(c => c.name === p.donorName)?.createdBy;
-            return creator === user?.name;
+        return (pundis || []).filter(p => {
+            const creator = p.createdBy || (contacts || []).find(c => c.name === p.donorName)?.createdBy;
+            return creator === currentUserName;
         });
-    }, [pundis, isAdmin, user, contacts]);
+    }, [pundis, isAdmin, currentUserName, contacts]);
 
     const visibleRiwayatPundis = useMemo(() => {
         if (isAdmin) return riwayatPundis;
-        return riwayatPundis.filter(r => r.amilName === user?.name);
-    }, [riwayatPundis, isAdmin, user]);
+        return (riwayatPundis || []).filter(r => r.amilName === currentUserName);
+    }, [riwayatPundis, isAdmin, currentUserName]);
 
     const contactOptions = visibleContacts.map(c => c.name);
 
-    /* ==========================================================
-       KALKULASI CAMPAIGN & SINKRONISASI PUNDI UMUM/PRIBADI
-       ========================================================== */
+    // Kalkulasi Campaign
     const calculatedPrograms = useMemo(() => {
         const sourceRiwayat = isAdmin ? riwayatPundis : visibleRiwayatPundis;
         const sourceDonations = isAdmin ? donations : visibleDonations;
 
-        // Filter riwayat & donasi sesuai bulan & tahun yang dipilih di Campaign
-        const filterByPeriod = (itemDate) => {
-            if (!itemDate) return false;
-            const d = new Date(itemDate);
-            if (isNaN(d.getTime())) return false;
-            const matchYear = campaignYear === 'Semua' ? true : d.getFullYear() === Number(campaignYear);
-            const matchMonth = campaignMonth === 'Semua' ? true : d.getMonth() === Number(campaignMonth);
-            return matchYear && matchMonth;
-        };
+        const totalPundiCollected = (sourceRiwayat || [])
+            .filter(r => r.status === 'Berhasil')
+            .reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
-        const periodRiwayat = sourceRiwayat.filter(r => r.status === 'Berhasil' && filterByPeriod(r.date));
-        const periodDonations = sourceDonations.filter(d => d.status === 'Berhasil' && filterByPeriod(d.date));
-
-        // Deteksi tipe pundi (jika tipePundi di riwayat kosong, cek dari data master pundi)
-        const getTipePundiOfRiwayat = (r) => {
-            if (r.tipePundi && String(r.tipePundi).trim() !== '') return r.tipePundi;
-            const matched = pundis.find(p => String(p.id) === String(r.pundiId) || String(p.noUrut) === String(r.noUrut));
-            return matched?.tipePundi || 'Pundi Umum';
-        };
-
-        return programs.map(p => {
-            const isPundiUmum = p.category === 'Pundi Umum' || (p.name && p.name.toLowerCase().includes('pundi umum'));
-            const isPundiPribadi = p.category === 'Pundi Pribadi' || (p.name && p.name.toLowerCase().includes('pundi pribadi'));
-            const isPundiKolektif = isPundiUmum || isPundiPribadi || (p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'));
+        return (programs || []).map(p => {
+            const isPundiCampaign = (p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'));
             const isAmilSpecific = p.assignedAmil && p.assignedAmil !== 'Semua Amil (Target Kolektif)' && p.assignedAmil !== 'Semua Amil';
             
-            let collected = 0;
-            if (isPundiUmum) {
-                const fromPundi = periodRiwayat
-                    .filter(r => getTipePundiOfRiwayat(r) === 'Pundi Umum')
-                    .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
-                    .reduce((sum, r) => sum + Number(r.amount || 0), 0);
-                const fromDonasi = periodDonations
-                    .filter(d => d.programName === p.name)
-                    .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
-                    .reduce((sum, d) => sum + Number(d.amount || 0), 0);
-                collected = fromPundi + fromDonasi;
-            } else if (isPundiPribadi) {
-                const fromPundi = periodRiwayat
-                    .filter(r => getTipePundiOfRiwayat(r) === 'Pundi Pribadi')
-                    .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
-                    .reduce((sum, r) => sum + Number(r.amount || 0), 0);
-                const fromDonasi = periodDonations
-                    .filter(d => d.programName === p.name)
-                    .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
-                    .reduce((sum, d) => sum + Number(d.amount || 0), 0);
-                collected = fromPundi + fromDonasi;
-            } else if (isPundiKolektif) {
-                const fromPundi = periodRiwayat
-                    .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
-                    .reduce((sum, r) => sum + Number(r.amount || 0), 0);
-                const fromDonasi = periodDonations
-                    .filter(d => d.programName === p.name)
-                    .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
-                    .reduce((sum, d) => sum + Number(d.amount || 0), 0);
-                collected = fromPundi + fromDonasi;
-            } else {
-                collected = periodDonations
-                    .filter(d => d.programName === p.name)
-                    .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
-                    .reduce((sum, d) => sum + Number(d.amount || 0), 0);
-            }
+            const donationCollected = (sourceDonations || [])
+                .filter(d => d.programName === p.name && d.status === 'Berhasil')
+                .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
+                .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+                
+            const pundiCollected = (sourceRiwayat || [])
+                .filter(r => r.status === 'Berhasil')
+                .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
+                .reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
-            const targetTotal = Number(p.target || 0);
-            const targetDisplay = campaignMonth === 'Semua' ? targetTotal : Math.round(targetTotal / 12);
-            const percent = targetDisplay > 0 ? Math.min(Math.round((collected / targetDisplay) * 100), 100) : 0;
-
-            return { 
-                ...p, 
-                collected, 
-                targetTotal,
-                targetDisplay,
-                percent,
-                isPundiUmum, 
-                isPundiPribadi, 
-                isPundiCampaign: isPundiKolektif, 
-                isAmilSpecific 
-            };
+            const collected = isPundiCampaign ? (donationCollected + (isAmilSpecific ? pundiCollected : totalPundiCollected)) : donationCollected;
+            return { ...p, collected, isPundiCampaign, isAmilSpecific };
         });
-    }, [programs, donations, riwayatPundis, visibleDonations, visibleRiwayatPundis, isAdmin, pundis, campaignMonth, campaignYear]);
+    }, [programs, donations, riwayatPundis, visibleDonations, visibleRiwayatPundis, isAdmin]);
 
-    // Filter daftar program berdasarkan kategori yang dipilih
-    const filteredCalculatedPrograms = useMemo(() => {
-        return calculatedPrograms.filter(p => {
-            if (campaignCategoryFilter === 'Semua') return true;
-            if (campaignCategoryFilter === 'Pundi Umum') return p.isPundiUmum;
-            if (campaignCategoryFilter === 'Pundi Pribadi') return p.isPundiPribadi;
-            return p.category === campaignCategoryFilter;
-        });
-    }, [calculatedPrograms, campaignCategoryFilter]);
-
-    if (!user) return <LoginScreen onLogin={handleLogin} amilsData={amils} darkMode={darkMode} setDarkMode={setDarkMode} onRefresh={() => fetchAllData(true)} isRefreshing={isRefreshing} />;
+    if (!user) {
+        return (
+            <LoginScreen 
+                onLogin={handleLogin} 
+                amilsData={amils} 
+                darkMode={darkMode} 
+                setDarkMode={setDarkMode} 
+                onRefresh={() => fetchAllData(true)} 
+                isRefreshing={isRefreshing} 
+            />
+        );
+    }
 
     const handleSaveContact = (formData, isEdit) => {
         let newDataToSave = { ...formData };
@@ -336,7 +313,7 @@ const App = () => {
     };
 
     const contactConfig = {
-        title: 'Data Kontak', 
+        title: 'Data Kontak Donatur', 
         data: visibleContacts,
         onSave: handleSaveContact, 
         onDelete: createDeleteHandler(setContacts, contacts, 'Kontak'),
@@ -365,7 +342,7 @@ const App = () => {
 
     const programConfig = {
         title: 'Campaign WIZ BERAU', 
-        data: programs,
+        data: calculatedPrograms,
         onSave: createSaveHandler(setPrograms, programs, 'Program'), 
         onDelete: createDeleteHandler(setPrograms, programs, 'Program'),
         columns: [
@@ -386,19 +363,15 @@ const App = () => {
                     </div>
                 </div>
             )},
-            { key: 'target', label: 'Target', render: r => formatRp(r.target) },
-            { key: 'collected', label: 'Terkumpul', render: r => {
-                const collected = donations.filter(d => d.programName === r.name && d.status === 'Berhasil').reduce((sum, d) => sum + Number(d.amount || 0), 0);
-                const percent = r.target > 0 ? Math.min(Math.round((collected / r.target) * 100), 100) : 0;
-                return (
-                    <div>
-                        <span className="text-wiz-green dark:text-emerald-400 font-bold">{formatRp(collected)}</span>
-                        {r.target > 0 && (
-                            <span className="ml-2 text-xs text-gray-400 font-medium">({percent}%)</span>
-                        )}
-                    </div>
-                );
-            }},
+            { key: 'target', label: 'Target', render: r => typeof formatRp === 'function' ? formatRp(r.target) : r.target },
+            { key: 'collected', label: 'Terkumpul', render: r => (
+                <div>
+                    <span className="text-wiz-green dark:text-emerald-400 font-bold">{typeof formatRp === 'function' ? formatRp(r.collected) : r.collected}</span>
+                    {r.target > 0 && (
+                        <span className="ml-2 text-xs text-gray-400 font-medium">({Math.min(Math.round((r.collected / r.target) * 100), 100)}%)</span>
+                    )}
+                </div>
+            )},
             { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> }
         ],
         schema: [
@@ -412,23 +385,22 @@ const App = () => {
     };
 
     const donationConfig = {
-        title: 'Data Transaksi', 
-        // Menggunakan visibleDonations agar Amil hanya melihat transaksi miliknya
+        title: 'Data Penerimaan Donasi', 
         data: visibleDonations,
         defaultValues: { amilName: user?.name, date: new Date().toISOString().split('T')[0] },
         onSave: createSaveHandler(setDonations, donations, 'Donasi'), 
         onDelete: createDeleteHandler(setDonations, donations, 'Donasi'),
         columns: [
-            { key: 'date', label: 'Tanggal', render: r => formatDate(r.date) },
+            { key: 'date', label: 'Tanggal', render: r => typeof formatDate === 'function' ? formatDate(r.date) : r.date },
             { key: 'donorName', label: 'Donatur', render: r => <span className="font-semibold">{r.donorName}</span> },
             { key: 'programName', label: 'Program' },
             { key: 'rekening', label: 'Bank' },
-            { key: 'amount', label: 'Nominal', render: r => <span className="font-bold text-wiz-green dark:text-emerald-400 bg-wiz-green/5 dark:bg-wiz-green/20 px-2 py-1 rounded-md">{formatRp(r.amount)}</span> },
+            { key: 'amount', label: 'Nominal', render: r => <span className="font-bold text-wiz-green dark:text-emerald-400 bg-wiz-green/5 dark:bg-wiz-green/20 px-2 py-1 rounded-md">{typeof formatRp === 'function' ? formatRp(r.amount) : r.amount}</span> },
             { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> },
             { key: 'amilName', label: 'PIC' },
             { key: 'receiptUrl', label: 'Bukti', render: r => {
                 if (!r.receiptUrl || String(r.receiptUrl).trim() === '') return <span className="text-gray-300 dark:text-gray-600">-</span>;
-                const directUrl = getDirectImageUrl(r.receiptUrl);
+                const directUrl = typeof getDirectImageUrl === 'function' ? getDirectImageUrl(r.receiptUrl) : r.receiptUrl;
                 return (
                     <div className="relative group w-10 h-10">
                         <img 
@@ -470,7 +442,7 @@ const App = () => {
             { key: 'name', label: 'Uraian Tugas', render: r => <span className="font-semibold text-gray-700 dark:text-gray-200">{r.name}</span> },
             { key: 'assignedTo', label: 'Pelaksana' },
             { key: 'period', label: 'Siklus', render: r => <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-md text-gray-600 dark:text-gray-300">{r.period}</span> },
-            { key: 'deadline', label: 'Batas', render: r => formatDate(r.deadline) },
+            { key: 'deadline', label: 'Batas', render: r => typeof formatDate === 'function' ? formatDate(r.deadline) : r.deadline },
             { key: 'status', label: 'Progress', render: r => <StatusBadge text={r.status} /> }
         ],
         schema: [
@@ -483,7 +455,7 @@ const App = () => {
     };
 
     const amilConfig = {
-        title: 'Akses Sistem', 
+        title: 'Pengaturan Akun Amil', 
         data: amils,
         onSave: createSaveHandler(setAmils, amils, 'Amil'), 
         onDelete: createDeleteHandler(setAmils, amils, 'Amil'),
@@ -492,7 +464,7 @@ const App = () => {
                 key: 'photoUrl', 
                 label: 'Foto Profil', 
                 render: r => {
-                    const direct = getDirectImageUrl(r.photoUrl);
+                    const direct = typeof getDirectImageUrl === 'function' ? getDirectImageUrl(r.photoUrl) : r.photoUrl;
                     return (
                         <div className="w-11 h-11 rounded-full overflow-hidden bg-wiz-green/10 text-wiz-green dark:text-emerald-400 flex items-center justify-center font-bold text-sm border-2 border-white dark:border-gray-700 shadow-sm">
                             {direct ? (
@@ -501,7 +473,7 @@ const App = () => {
                                     alt={r.name} 
                                     className="w-full h-full object-cover cursor-pointer" 
                                     onClick={() => setViewImage ? setViewImage({ direct: direct, original: r.photoUrl }) : window.open(direct, '_blank')} 
-                                    onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} 
+                                    onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }} 
                                 />
                             ) : null}
                             <span style={{ display: direct ? 'none' : 'block' }}>{r.name?.charAt(0) || 'A'}</span>
@@ -515,7 +487,7 @@ const App = () => {
             { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> }
         ],
         schema: [
-            { name: 'photoUrl', label: 'Foto Profil Amil (Upload ke Cloud)', type: 'file', fullWidth: true },
+            { name: 'photoUrl', label: 'Foto Profil Amil (Upload)', type: 'file', fullWidth: true },
             { name: 'name', label: 'Nama Lengkap', required: true },
             { name: 'email', label: 'Email Akses', type: 'email', required: true },
             { name: 'password', label: 'Kata Sandi', required: true },
@@ -545,7 +517,7 @@ const App = () => {
                         src="https://drive.google.com/uc?id=1TcpcZtGKBKAOBAthf6Rea4HHDZ0l9tBU" 
                         alt="Logo WIZ" 
                         className="h-10 object-contain"
-                        onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }}
+                        onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }}
                     />
                     <div style={{display: 'none'}} className="text-3xl font-black text-wiz-green dark:text-emerald-400 tracking-tighter">WIZ<span className="text-wiz-orange">BERAU</span></div>
                 </div>
@@ -569,7 +541,7 @@ const App = () => {
                 <div className="p-5 border-t border-gray-50 dark:border-gray-700">
                     {isOfflineMode && (
                         <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs px-4 py-3 rounded-xl flex items-center gap-2 font-semibold mb-3 border border-red-100 dark:border-red-800/50">
-                            <i className="fa-solid fa-wifi"></i> Luring / Disconnect
+                            <i className="fa-solid fa-wifi"></i> Luring / Offline
                         </div>
                     )}
                     <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-colors text-sm font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 border border-transparent hover:border-red-100 dark:hover:border-red-900/50">
@@ -595,7 +567,7 @@ const App = () => {
                         <button 
                             onClick={() => setDarkMode(!darkMode)} 
                             className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-wiz-orange dark:hover:text-yellow-400 hover:bg-wiz-orange/10 dark:hover:bg-gray-700 rounded-full transition-all border border-transparent hover:border-wiz-orange/20"
-                            title={darkMode ? "Aktifkan Mode Terang" : "Aktifkan Mode Malam"}
+                            title={darkMode ? "Mode Terang" : "Mode Gelap"}
                         >
                             <i className={`fa-solid ${darkMode ? 'fa-sun text-yellow-400' : 'fa-moon'} text-lg`}></i>
                         </button>
@@ -604,7 +576,7 @@ const App = () => {
                             onClick={() => fetchAllData(true)} 
                             disabled={isRefreshing}
                             className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-wiz-green dark:hover:text-emerald-400 hover:bg-wiz-green/10 dark:hover:bg-gray-700 rounded-full transition-all border border-transparent hover:border-wiz-green/20"
-                            title="Sinkronisasi Awan"
+                            title="Sinkronisasi Data"
                         >
                             <i className={`fa-solid fa-rotate text-lg ${isRefreshing ? 'fa-spin text-wiz-green dark:text-emerald-400' : ''}`}></i>
                         </button>
@@ -618,10 +590,10 @@ const App = () => {
                                 <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-wiz-green to-[#2e8870] flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-gray-700 overflow-hidden">
                                     {user.photoUrl ? (
                                         <img 
-                                            src={getDirectImageUrl(user.photoUrl)} 
+                                            src={typeof getDirectImageUrl === 'function' ? getDirectImageUrl(user.photoUrl) : user.photoUrl} 
                                             alt={user.name} 
                                             className="w-full h-full object-cover" 
-                                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} 
+                                            onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }} 
                                         />
                                     ) : null}
                                     <span style={{ display: user.photoUrl ? 'none' : 'block' }}>
@@ -644,7 +616,7 @@ const App = () => {
 
                 <div className="flex-1 overflow-auto p-3 sm:p-6 lg:p-8 custom-scrollbar relative">
                     <div className="max-w-7xl mx-auto pb-28 sm:pb-28">
-                        {/* Meneruskan data terfilter sesuai amil (kecuali admin yang melihat semua) */}
+                        {/* Beranda: Menampilkan data tersaring untuk Amil, dan seluruh data untuk Admin */}
                         {activeTab === 'dashboard' && (
                             <DashboardView 
                                 data={{ 
@@ -662,11 +634,7 @@ const App = () => {
                         {activeTab === 'donatur_donasi' && <DonaturDanDonasiView contactConfig={contactConfig} donationConfig={donationConfig} isAdmin={isAdmin} />}
                         {activeTab === 'pundi' && <PundiView pundis={pundis} setPundis={setPundis} riwayatPundis={riwayatPundis} setRiwayatPundis={setRiwayatPundis} contacts={contacts} programs={programs} user={user} syncDataToSheet={syncDataToSheet} darkMode={darkMode} setViewImage={setViewImage} amils={amils} setActiveTab={setActiveTab} />}
                         {activeTab === 'scanner' && <ScannerView pundis={pundis} riwayatPundis={riwayatPundis} setRiwayatPundis={setRiwayatPundis} user={user} syncDataToSheet={syncDataToSheet} setActiveTab={setActiveTab} />}
-                        {activeTab === 'program' && (
-                            <div className="space-y-6 slide-up">
-                                <ModuleView {...programConfig} canAdd={isAdmin} canEdit={isAdmin} canDelete={isAdmin} />
-                            </div>
-                        )}
+                        {activeTab === 'program' && <ModuleView {...programConfig} canAdd={isAdmin} canEdit={isAdmin} canDelete={isAdmin} />}
                         {activeTab === 'tugas' && <ModuleView {...taskConfig} canAdd={isAdmin} canEdit={isAdmin} canDelete={isAdmin} />}
                         {activeTab === 'amil' && isAdmin && <ModuleView {...amilConfig} />}
                     </div>
@@ -720,7 +688,7 @@ const App = () => {
                 </div>
             </main>
 
-            {/* MODAL PASSWORD */}
+            {/* MODAL GANTI SANDI */}
             <Modal isOpen={isPasswordModalOpen} onClose={() => setIsPasswordModalOpen(false)} title="Pengaturan Keamanan">
                 <form onSubmit={handleChangePassword} className="space-y-4">
                     {pwdError && <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 p-3 rounded-xl border border-red-100 dark:border-red-800 font-medium flex items-center gap-2"><i className="fa-solid fa-triangle-exclamation"></i> {pwdError}</p>}
@@ -739,7 +707,7 @@ const App = () => {
                 </form>
             </Modal>
 
-            {/* MODAL HAPUS DATA */}
+            {/* MODAL KONFIRMASI HAPUS */}
             <Modal isOpen={!!deletePrompt} onClose={() => setDeletePrompt(null)}>
                 <div className="p-4 flex flex-col items-center justify-center text-center">
                     <div className="bg-red-50 dark:bg-red-950/50 p-5 rounded-full text-red-500 mb-5 relative">
@@ -747,7 +715,7 @@ const App = () => {
                         <i className="fa-solid fa-trash-can text-4xl relative z-10"></i>
                     </div>
                     <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 mb-2">Konfirmasi Hapus</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 max-w-sm font-medium">Langkah ini akan menghapus data secara permanen dari server awan Google Sheet Anda.</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 max-w-sm font-medium">Data ini akan dihapus secara permanen dari server awan Google Sheets Anda.</p>
                     <div className="flex gap-3 w-full">
                         <Button variant="secondary" className="flex-1 py-3" onClick={() => setDeletePrompt(null)}>Batal</Button>
                         <Button variant="danger" className="flex-1 py-3" onClick={confirmDelete}>Ya, Hapus Permanen</Button>
@@ -755,7 +723,7 @@ const App = () => {
                 </div>
             </Modal>
 
-            {/* POP UP DRIVE PREVIEW */}
+            {/* MODAL PREVIEW BERKAS / GAMBAR */}
             {viewImage && (
                 <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-gray-900/90 dark:bg-black/95 backdrop-blur-md animate-in" onClick={() => setViewImage(null)}>
                     <div className="relative max-w-4xl w-full h-[85vh] flex justify-center items-center slide-up">
@@ -769,7 +737,7 @@ const App = () => {
                                 <p className="text-sm text-gray-400 dark:text-gray-500 font-medium">Memuat berkas dari Drive...</p>
                             </div>
                             <iframe 
-                                src={getDrivePreviewUrl(viewImage.original)} 
+                                src={typeof getDrivePreviewUrl === 'function' ? getDrivePreviewUrl(viewImage.original) : viewImage.original} 
                                 className="w-full h-full border-0 relative z-10 bg-transparent" 
                                 allow="autoplay"
                                 title="Penampil Berkas"
@@ -784,5 +752,7 @@ const App = () => {
 
 // Render App ke DOM
 const rootElement = document.getElementById('root');
-const root = ReactDOM.createRoot(rootElement);
-root.render(<App />);
+if (rootElement) {
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(<App />);
+}
