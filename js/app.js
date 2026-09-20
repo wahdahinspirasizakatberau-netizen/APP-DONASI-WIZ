@@ -1,6 +1,4 @@
-// Controller Utama Aplikasi CRM WIZ Berau (Autentikasi Cepat & Penyaringan Data Amil vs Admin)
-
-const { useState, useEffect, useMemo, useRef } = React;
+// Controller Utama Aplikasi CRM WIZ Berau
 
 const App = () => {
     const safeGetJSON = (key, fallback) => {
@@ -23,6 +21,7 @@ const App = () => {
     };
 
     const [user, setUser] = useState(() => safeGetJSON('wiz_user_session', null));
+    const [isInitializing, setIsInitializing] = useState(() => !safeGetJSON('wiz_user_session', null));
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isOfflineMode, setIsOfflineMode] = useState(false);
     const [activeTab, setActiveTab] = useState('dashboard');
@@ -41,14 +40,17 @@ const App = () => {
     const [deletePrompt, setDeletePrompt] = useState(null);
     const [viewImage, setViewImage] = useState(null);
 
-    // Muat data dari cache lokal untuk membuka aplikasi seketika (< 0.5 detik)
-    const [amils, setAmils] = useState(() => safeGetJSON('wiz_cache_Amil', typeof fallbackAmils !== 'undefined' ? fallbackAmils : (typeof window !== 'undefined' && window.fallbackAmils ? window.fallbackAmils : [])));
+    const [amils, setAmils] = useState(() => safeGetJSON('wiz_cache_Amil', fallbackAmils));
     const [contacts, setContacts] = useState(() => safeGetJSON('wiz_cache_Kontak', []));
     const [programs, setPrograms] = useState(() => safeGetJSON('wiz_cache_Program', []));
     const [donations, setDonations] = useState(() => safeGetJSON('wiz_cache_Donasi', []));
     const [tasks, setTasks] = useState(() => safeGetJSON('wiz_cache_Tugas', []));
+    
     const [pundis, setPundis] = useState(() => safeGetJSON('wiz_cache_Pundi', []));
     const [riwayatPundis, setRiwayatPundis] = useState(() => safeGetJSON('wiz_cache_RiwayatPundi', []));
+
+    const [selectedCampaignBreakdown, setSelectedCampaignBreakdown] = useState(null);
+    const [campaignSubTab, setCampaignSubTab] = useState('campaigns');
 
     useEffect(() => {
         if (darkMode) {
@@ -60,18 +62,14 @@ const App = () => {
         }
     }, [darkMode]);
 
-    // Sinkronisasi data latar belakang dari Google Apps Script
     const fetchAllData = async (isManualRefresh = false) => {
         if (isManualRefresh) setIsRefreshing(true);
         try {
-            const targetUrl = typeof API_URL !== 'undefined' ? API_URL : (typeof window !== 'undefined' ? window.API_URL : '');
-            if (!targetUrl) return;
-
-            const res = await fetch(targetUrl);
+            const res = await fetch(API_URL);
             const result = await res.json();
             if (result.status === 'success' && result.data) {
                 const d = result.data;
-                if (Array.isArray(d.Amil) && d.Amil.length > 0) {
+                if (d.Amil?.length > 0) {
                     setAmils(d.Amil);
                     safeSetJSON('wiz_cache_Amil', d.Amil);
                     
@@ -94,62 +92,26 @@ const App = () => {
                 if (d.RiwayatPundi) { setRiwayatPundis(d.RiwayatPundi); safeSetJSON('wiz_cache_RiwayatPundi', d.RiwayatPundi); }
                 
                 setIsOfflineMode(false);
-            } else { 
-                setIsOfflineMode(true); 
-            }
+            } else { setIsOfflineMode(true); }
         } catch (err) {
-            console.error("Gagal sinkron data awan:", err);
             setIsOfflineMode(true);
         } finally {
+            setIsInitializing(false);
             setIsRefreshing(false);
         }
     };
 
     useEffect(() => { fetchAllData(); }, []);
 
-    // Autentikasi Cerdas: Cek di memori lokal, jika belum ada langsung fetch dari server online
-    const handleLogin = async (email, password, setError) => {
+    const handleLogin = (email, password, setError) => {
         const cleanEmail = String(email || '').trim().toLowerCase();
         const cleanPassword = String(password || '').trim();
 
-        let currentAmils = Array.isArray(amils) && amils.length > 0 ? amils : (typeof window !== 'undefined' && window.fallbackAmils ? window.fallbackAmils : []);
-
-        let foundUser = currentAmils.find(a => {
+        const foundUser = amils.find(a => {
             const amilEmail = String(a.email || '').trim().toLowerCase();
             const amilPass = String(a.password || '').trim();
             return amilEmail === cleanEmail && amilPass === cleanPassword;
         });
-
-        // Jika tidak ditemukan di data cache, ambil langsung dari server Google Sheets secara instan
-        if (!foundUser) {
-            try {
-                const targetUrl = typeof API_URL !== 'undefined' ? API_URL : (typeof window !== 'undefined' ? window.API_URL : '');
-                if (targetUrl) {
-                    const res = await fetch(targetUrl);
-                    const result = await res.json();
-                    if (result.status === 'success' && result.data && Array.isArray(result.data.Amil)) {
-                        currentAmils = result.data.Amil;
-                        setAmils(currentAmils);
-                        safeSetJSON('wiz_cache_Amil', currentAmils);
-
-                        if (result.data.Kontak) { setContacts(result.data.Kontak); safeSetJSON('wiz_cache_Kontak', result.data.Kontak); }
-                        if (result.data.Program) { setPrograms(result.data.Program); safeSetJSON('wiz_cache_Program', result.data.Program); }
-                        if (result.data.Donasi) { setDonations(result.data.Donasi); safeSetJSON('wiz_cache_Donasi', result.data.Donasi); }
-                        if (result.data.Tugas) { setTasks(result.data.Tugas); safeSetJSON('wiz_cache_Tugas', result.data.Tugas); }
-                        if (result.data.Pundi) { setPundis(result.data.Pundi); safeSetJSON('wiz_cache_Pundi', result.data.Pundi); }
-                        if (result.data.RiwayatPundi) { setRiwayatPundis(result.data.RiwayatPundi); safeSetJSON('wiz_cache_RiwayatPundi', result.data.RiwayatPundi); }
-
-                        foundUser = currentAmils.find(a => {
-                            const amilEmail = String(a.email || '').trim().toLowerCase();
-                            const amilPass = String(a.password || '').trim();
-                            return amilEmail === cleanEmail && amilPass === cleanPassword;
-                        });
-                    }
-                }
-            } catch (err) {
-                console.error("Gagal verifikasi online:", err);
-            }
-        }
 
         if (foundUser) {
             if (String(foundUser.status || '').trim().toLowerCase() !== 'aktif') {
@@ -160,7 +122,7 @@ const App = () => {
             setUser(foundUser);
             setError('');
         } else {
-            setError('Email atau kata sandi tidak cocok. Pastikan data akun benar.');
+            setError('Kredensial tidak valid. Pastikan email dan sandi benar.');
         }
     };
 
@@ -173,10 +135,7 @@ const App = () => {
     const syncDataToSheet = async (sheetName, newData) => {
         safeSetJSON('wiz_cache_' + sheetName, newData);
         try {
-            const targetUrl = typeof API_URL !== 'undefined' ? API_URL : (typeof window !== 'undefined' ? window.API_URL : '');
-            if (targetUrl) {
-                await fetch(targetUrl, { method: 'POST', body: JSON.stringify({ action: 'syncData', sheetName, data: newData }) });
-            }
+            await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'syncData', sheetName, data: newData }) });
         } catch(err) { setIsOfflineMode(true); }
     };
 
@@ -200,7 +159,6 @@ const App = () => {
     const createSaveHandler = (setter, state, sheetName) => (data, isEdit) => {
         let newDataToSave = { ...data };
         if (!isEdit && sheetName === 'Kontak' && user) newDataToSave.createdBy = user.name;
-        if (!isEdit && sheetName === 'Donasi' && user && !newDataToSave.amilName) newDataToSave.amilName = user.name;
         let newData = isEdit ? state.map(item => item.id === newDataToSave.id ? newDataToSave : item) : [...state, newDataToSave];
         setter(newData);
         safeSetJSON('wiz_cache_' + sheetName, newData);
@@ -225,63 +183,21 @@ const App = () => {
         setDeletePrompt(null);
     };
 
-    const isAdmin = user?.role === 'Admin';
-    const currentUserName = user?.name || '';
-
-    /* =========================================================================
-       PENYARINGAN DATA KETAT:
-       - JIKA ADMIN: Melihat seluruh data kolektif (Semua Amil).
-       - JIKA AMIL BIASA: Hanya melihat data miliknya sendiri (Pundi, Donasi, Kontak, Tugas).
-       ========================================================================= */
-    const visibleContacts = useMemo(() => {
-        if (isAdmin) return contacts;
-        return (contacts || []).filter(c => c.createdBy === currentUserName);
-    }, [contacts, isAdmin, currentUserName]);
-
-    const visibleDonations = useMemo(() => {
-        if (isAdmin) return donations;
-        return (donations || []).filter(d => d.amilName === currentUserName);
-    }, [donations, isAdmin, currentUserName]);
-
-    const visibleTasks = useMemo(() => {
-        if (isAdmin) return tasks;
-        return (tasks || []).filter(t => t.assignedTo === currentUserName);
-    }, [tasks, isAdmin, currentUserName]);
-
-    const visiblePundis = useMemo(() => {
-        if (isAdmin) return pundis;
-        return (pundis || []).filter(p => {
-            const creator = p.createdBy || (contacts || []).find(c => c.name === p.donorName)?.createdBy;
-            return creator === currentUserName;
-        });
-    }, [pundis, isAdmin, currentUserName, contacts]);
-
-    const visibleRiwayatPundis = useMemo(() => {
-        if (isAdmin) return riwayatPundis;
-        return (riwayatPundis || []).filter(r => r.amilName === currentUserName);
-    }, [riwayatPundis, isAdmin, currentUserName]);
-
-    const contactOptions = visibleContacts.map(c => c.name);
-
-    // Kalkulasi Campaign
     const calculatedPrograms = useMemo(() => {
-        const sourceRiwayat = isAdmin ? riwayatPundis : visibleRiwayatPundis;
-        const sourceDonations = isAdmin ? donations : visibleDonations;
-
-        const totalPundiCollected = (sourceRiwayat || [])
+        const totalPundiCollected = riwayatPundis
             .filter(r => r.status === 'Berhasil')
             .reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
-        return (programs || []).map(p => {
+        return programs.map(p => {
             const isPundiCampaign = (p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'));
             const isAmilSpecific = p.assignedAmil && p.assignedAmil !== 'Semua Amil (Target Kolektif)' && p.assignedAmil !== 'Semua Amil';
             
-            const donationCollected = (sourceDonations || [])
+            const donationCollected = donations
                 .filter(d => d.programName === p.name && d.status === 'Berhasil')
                 .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
                 .reduce((sum, d) => sum + Number(d.amount || 0), 0);
                 
-            const pundiCollected = (sourceRiwayat || [])
+            const pundiCollected = riwayatPundis
                 .filter(r => r.status === 'Berhasil')
                 .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
                 .reduce((sum, r) => sum + Number(r.amount || 0), 0);
@@ -289,20 +205,25 @@ const App = () => {
             const collected = isPundiCampaign ? (donationCollected + (isAmilSpecific ? pundiCollected : totalPundiCollected)) : donationCollected;
             return { ...p, collected, isPundiCampaign, isAmilSpecific };
         });
-    }, [programs, donations, riwayatPundis, visibleDonations, visibleRiwayatPundis, isAdmin]);
+    }, [programs, donations, riwayatPundis]);
 
-    if (!user) {
-        return (
-            <LoginScreen 
-                onLogin={handleLogin} 
-                amilsData={amils} 
-                darkMode={darkMode} 
-                setDarkMode={setDarkMode} 
-                onRefresh={() => fetchAllData(true)} 
-                isRefreshing={isRefreshing} 
-            />
-        );
-    }
+    if (isInitializing) return (
+        <div className="h-screen w-full flex flex-col items-center justify-center bg-wiz-light dark:bg-gray-900 transition-colors">
+            <div className="w-24 h-24 mb-6 relative">
+                <div className="absolute inset-0 rounded-full border-t-4 border-wiz-green animate-spin"></div>
+                <div className="absolute inset-2 rounded-full border-r-4 border-wiz-orange animate-spin animation-delay-150"></div>
+                <i className="fa-solid fa-leaf absolute inset-0 flex items-center justify-center text-3xl text-wiz-green dark:text-emerald-400"></i>
+            </div>
+            <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-1">Menyiapkan Workspace...</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Sinkronisasi data awan</p>
+        </div>
+    );
+
+    if (!user) return <LoginScreen onLogin={handleLogin} amilsData={amils} darkMode={darkMode} setDarkMode={setDarkMode} onRefresh={() => fetchAllData(true)} isRefreshing={isRefreshing} />;
+
+    const isAdmin = user?.role === 'Admin';
+    const visibleContacts = isAdmin ? contacts : contacts.filter(c => c.createdBy === user.name);
+    const contactOptions = visibleContacts.map(c => c.name);
 
     const handleSaveContact = (formData, isEdit) => {
         let newDataToSave = { ...formData };
@@ -313,10 +234,8 @@ const App = () => {
     };
 
     const contactConfig = {
-        title: 'Data Kontak Donatur', 
-        data: visibleContacts,
-        onSave: handleSaveContact, 
-        onDelete: createDeleteHandler(setContacts, contacts, 'Kontak'),
+        title: 'Data Kontak', data: visibleContacts,
+        onSave: handleSaveContact, onDelete: createDeleteHandler(setContacts, contacts, 'Kontak'),
         columns: [
             { key: 'name', label: 'Nama' },
             { key: 'phone', label: 'No. Telp / WA', render: r => <span className="font-medium text-gray-800 dark:text-gray-200">{r.phone}</span> },
@@ -341,17 +260,22 @@ const App = () => {
     };
 
     const programConfig = {
-        title: 'Campaign WIZ BERAU', 
-        data: calculatedPrograms,
-        onSave: createSaveHandler(setPrograms, programs, 'Program'), 
-        onDelete: createDeleteHandler(setPrograms, programs, 'Program'),
+        title: 'Campaign WIZ BERAU', data: calculatedPrograms,
+        onSave: createSaveHandler(setPrograms, programs, 'Program'), onDelete: createDeleteHandler(setPrograms, programs, 'Program'),
         columns: [
             { key: 'name', label: 'Nama Campaign', render: r => (
                 <div>
-                    <span className="font-bold text-gray-800 dark:text-gray-100">{r.name}</span>
+                    <div className="flex items-center gap-2">
+                        <span className="font-bold text-gray-800 dark:text-gray-100">{r.name}</span>
+                        {r.isPundiCampaign && (
+                            <span className="px-2 py-0.5 bg-wiz-orange/10 dark:bg-amber-900/30 text-wiz-orange dark:text-amber-400 text-[11px] font-bold rounded-md flex items-center gap-1 border border-wiz-orange/20">
+                                <i className="fa-solid fa-box-open"></i> Sinkron Pundi
+                            </span>
+                        )}
+                    </div>
                     <div className="flex flex-wrap items-center gap-2 mt-1">
-                        <span className="text-[11px] text-gray-400 dark:text-gray-500">{r.category || 'Reguler'}</span>
-                        {r.assignedAmil && r.assignedAmil !== 'Semua Amil' ? (
+                        <span className="text-[11px] text-gray-400 dark:text-gray-500">{r.category || (r.isPundiCampaign ? 'Pundi (Kotak Amal)' : 'Reguler')}</span>
+                        {r.assignedAmil && r.assignedAmil !== 'Semua Amil (Target Kolektif)' ? (
                             <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 text-[11px] font-semibold rounded-md flex items-center gap-1 border border-blue-200 dark:border-blue-800">
                                 <i className="fa-solid fa-user-tag text-[10px]"></i> Amil: {r.assignedAmil}
                             </span>
@@ -363,21 +287,31 @@ const App = () => {
                     </div>
                 </div>
             )},
-            { key: 'target', label: 'Target', render: r => typeof formatRp === 'function' ? formatRp(r.target) : r.target },
+            { key: 'target', label: 'Target', render: r => formatRp(r.target) },
             { key: 'collected', label: 'Terkumpul', render: r => (
                 <div>
-                    <span className="text-wiz-green dark:text-emerald-400 font-bold">{typeof formatRp === 'function' ? formatRp(r.collected) : r.collected}</span>
+                    <span className="text-wiz-green dark:text-emerald-400 font-bold">{formatRp(r.collected)}</span>
                     {r.target > 0 && (
                         <span className="ml-2 text-xs text-gray-400 font-medium">({Math.min(Math.round((r.collected / r.target) * 100), 100)}%)</span>
                     )}
                 </div>
             )},
-            { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> }
+            { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> },
+            { key: 'kontribusi', label: 'Rincian Capaian', render: r => (
+                <button
+                    type="button"
+                    onClick={() => setSelectedCampaignBreakdown(r)}
+                    className="px-2.5 py-1 text-xs font-semibold bg-wiz-green/10 hover:bg-wiz-green text-wiz-green hover:text-white dark:bg-emerald-900/30 dark:text-emerald-300 rounded-lg transition-colors flex items-center gap-1.5 border border-wiz-green/20"
+                    title="Lihat Capaian Masing-Masing Amil"
+                >
+                    <i className="fa-solid fa-chart-simple"></i> Capaian Amil
+                </button>
+            )}
         ],
         schema: [
             { name: 'name', label: 'Nama Campaign / Program', required: true, fullWidth: true },
-            { name: 'category', label: 'Kategori Program', type: 'select', options: ['Reguler (Donasi Umum)', 'Kemanusiaan', 'Pendidikan', 'Dakwah', 'Kesehatan'], required: true },
-            { name: 'assignedAmil', label: 'Penanggung Jawab / Amil', type: 'select', options: ['Semua Amil', ...amils.map(a => a.name)], required: true },
+            { name: 'category', label: 'Jenis / Sumber Dana', type: 'select', options: ['Reguler (Donasi Umum)', 'Pundi (Kotak Amal)'], required: true },
+            { name: 'assignedAmil', label: 'Penanggung Jawab / Amil', type: 'select', options: ['Semua Amil (Target Kolektif)', ...amils.map(a => a.name)], required: true },
             { name: 'target', label: 'Target Pendanaan', isCurrency: true, required: true },
             { name: 'deadline', label: 'Berakhir Pada', type: 'date', required: true },
             { name: 'status', label: 'Status Aktif', type: 'select', options: ['Aktif', 'Selesai', 'Dibatalkan'], required: true }
@@ -385,22 +319,20 @@ const App = () => {
     };
 
     const donationConfig = {
-        title: 'Data Penerimaan Donasi', 
-        data: visibleDonations,
+        title: 'Data Transaksi', data: donations,
         defaultValues: { amilName: user?.name, date: new Date().toISOString().split('T')[0] },
-        onSave: createSaveHandler(setDonations, donations, 'Donasi'), 
-        onDelete: createDeleteHandler(setDonations, donations, 'Donasi'),
+        onSave: createSaveHandler(setDonations, donations, 'Donasi'), onDelete: createDeleteHandler(setDonations, donations, 'Donasi'),
         columns: [
-            { key: 'date', label: 'Tanggal', render: r => typeof formatDate === 'function' ? formatDate(r.date) : r.date },
+            { key: 'date', label: 'Tanggal', render: r => formatDate(r.date) },
             { key: 'donorName', label: 'Donatur', render: r => <span className="font-semibold">{r.donorName}</span> },
             { key: 'programName', label: 'Program' },
             { key: 'rekening', label: 'Bank' },
-            { key: 'amount', label: 'Nominal', render: r => <span className="font-bold text-wiz-green dark:text-emerald-400 bg-wiz-green/5 dark:bg-wiz-green/20 px-2 py-1 rounded-md">{typeof formatRp === 'function' ? formatRp(r.amount) : r.amount}</span> },
+            { key: 'amount', label: 'Nominal', render: r => <span className="font-bold text-wiz-green dark:text-emerald-400 bg-wiz-green/5 dark:bg-wiz-green/20 px-2 py-1 rounded-md">{formatRp(r.amount)}</span> },
             { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> },
             { key: 'amilName', label: 'PIC' },
             { key: 'receiptUrl', label: 'Bukti', render: r => {
                 if (!r.receiptUrl || String(r.receiptUrl).trim() === '') return <span className="text-gray-300 dark:text-gray-600">-</span>;
-                const directUrl = typeof getDirectImageUrl === 'function' ? getDirectImageUrl(r.receiptUrl) : r.receiptUrl;
+                const directUrl = getDirectImageUrl(r.receiptUrl);
                 return (
                     <div className="relative group w-10 h-10">
                         <img 
@@ -428,21 +360,21 @@ const App = () => {
             { name: 'amount', label: 'Nominal', isCurrency: true, required: true },
             { name: 'date', label: 'Tanggal Bayar', type: 'date', required: true },
             { name: 'status', label: 'Status Transfer', type: 'select', options: ['Berhasil', 'Menunggu Validasi', 'Gagal'], required: true },
-            { name: 'amilName', label: 'PIC Amil', type: 'select', options: isAdmin ? amils.map(a => a.name) : [user?.name], required: true },
+            { name: 'amilName', label: 'PIC Amil', type: 'select', options: amils.map(a => a.name), required: true },
             { name: 'receiptUrl', label: 'Bukti Validasi (Opsional)', type: 'file', fullWidth: true }
         ]
     };
 
+    const visibleTasks = isAdmin ? tasks : tasks.filter(t => t.assignedTo === user.name);
+
     const taskConfig = {
-        title: 'Tugas Operasional', 
-        data: visibleTasks,
-        onSave: createSaveHandler(setTasks, tasks, 'Tugas'), 
-        onDelete: createDeleteHandler(setTasks, tasks, 'Tugas'),
+        title: 'Tugas Operasional', data: visibleTasks,
+        onSave: createSaveHandler(setTasks, tasks, 'Tugas'), onDelete: createDeleteHandler(setTasks, tasks, 'Tugas'),
         columns: [
             { key: 'name', label: 'Uraian Tugas', render: r => <span className="font-semibold text-gray-700 dark:text-gray-200">{r.name}</span> },
             { key: 'assignedTo', label: 'Pelaksana' },
             { key: 'period', label: 'Siklus', render: r => <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-md text-gray-600 dark:text-gray-300">{r.period}</span> },
-            { key: 'deadline', label: 'Batas', render: r => typeof formatDate === 'function' ? formatDate(r.deadline) : r.deadline },
+            { key: 'deadline', label: 'Batas', render: r => formatDate(r.deadline) },
             { key: 'status', label: 'Progress', render: r => <StatusBadge text={r.status} /> }
         ],
         schema: [
@@ -455,16 +387,14 @@ const App = () => {
     };
 
     const amilConfig = {
-        title: 'Pengaturan Akun Amil', 
-        data: amils,
-        onSave: createSaveHandler(setAmils, amils, 'Amil'), 
-        onDelete: createDeleteHandler(setAmils, amils, 'Amil'),
+        title: 'Akses Sistem', data: amils,
+        onSave: createSaveHandler(setAmils, amils, 'Amil'), onDelete: createDeleteHandler(setAmils, amils, 'Amil'),
         columns: [
             { 
                 key: 'photoUrl', 
                 label: 'Foto Profil', 
                 render: r => {
-                    const direct = typeof getDirectImageUrl === 'function' ? getDirectImageUrl(r.photoUrl) : r.photoUrl;
+                    const direct = getDirectImageUrl(r.photoUrl);
                     return (
                         <div className="w-11 h-11 rounded-full overflow-hidden bg-wiz-green/10 text-wiz-green dark:text-emerald-400 flex items-center justify-center font-bold text-sm border-2 border-white dark:border-gray-700 shadow-sm">
                             {direct ? (
@@ -473,7 +403,7 @@ const App = () => {
                                     alt={r.name} 
                                     className="w-full h-full object-cover cursor-pointer" 
                                     onClick={() => setViewImage ? setViewImage({ direct: direct, original: r.photoUrl }) : window.open(direct, '_blank')} 
-                                    onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }} 
+                                    onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} 
                                 />
                             ) : null}
                             <span style={{ display: direct ? 'none' : 'block' }}>{r.name?.charAt(0) || 'A'}</span>
@@ -487,7 +417,7 @@ const App = () => {
             { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> }
         ],
         schema: [
-            { name: 'photoUrl', label: 'Foto Profil Amil (Upload)', type: 'file', fullWidth: true },
+            { name: 'photoUrl', label: 'Foto Profil Amil (Upload ke Cloud)', type: 'file', fullWidth: true },
             { name: 'name', label: 'Nama Lengkap', required: true },
             { name: 'email', label: 'Email Akses', type: 'email', required: true },
             { name: 'password', label: 'Kata Sandi', required: true },
@@ -517,7 +447,7 @@ const App = () => {
                         src="https://drive.google.com/uc?id=1TcpcZtGKBKAOBAthf6Rea4HHDZ0l9tBU" 
                         alt="Logo WIZ" 
                         className="h-10 object-contain"
-                        onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }}
+                        onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }}
                     />
                     <div style={{display: 'none'}} className="text-3xl font-black text-wiz-green dark:text-emerald-400 tracking-tighter">WIZ<span className="text-wiz-orange">BERAU</span></div>
                 </div>
@@ -541,7 +471,7 @@ const App = () => {
                 <div className="p-5 border-t border-gray-50 dark:border-gray-700">
                     {isOfflineMode && (
                         <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs px-4 py-3 rounded-xl flex items-center gap-2 font-semibold mb-3 border border-red-100 dark:border-red-800/50">
-                            <i className="fa-solid fa-wifi"></i> Luring / Offline
+                            <i className="fa-solid fa-wifi"></i> Luring / Disconnect
                         </div>
                     )}
                     <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-colors text-sm font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 border border-transparent hover:border-red-100 dark:hover:border-red-900/50">
@@ -567,7 +497,7 @@ const App = () => {
                         <button 
                             onClick={() => setDarkMode(!darkMode)} 
                             className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-wiz-orange dark:hover:text-yellow-400 hover:bg-wiz-orange/10 dark:hover:bg-gray-700 rounded-full transition-all border border-transparent hover:border-wiz-orange/20"
-                            title={darkMode ? "Mode Terang" : "Mode Gelap"}
+                            title={darkMode ? "Aktifkan Mode Terang" : "Aktifkan Mode Malam"}
                         >
                             <i className={`fa-solid ${darkMode ? 'fa-sun text-yellow-400' : 'fa-moon'} text-lg`}></i>
                         </button>
@@ -576,7 +506,7 @@ const App = () => {
                             onClick={() => fetchAllData(true)} 
                             disabled={isRefreshing}
                             className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-wiz-green dark:hover:text-emerald-400 hover:bg-wiz-green/10 dark:hover:bg-gray-700 rounded-full transition-all border border-transparent hover:border-wiz-green/20"
-                            title="Sinkronisasi Data"
+                            title="Sinkronisasi Awan"
                         >
                             <i className={`fa-solid fa-rotate text-lg ${isRefreshing ? 'fa-spin text-wiz-green dark:text-emerald-400' : ''}`}></i>
                         </button>
@@ -590,10 +520,10 @@ const App = () => {
                                 <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-wiz-green to-[#2e8870] flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-gray-700 overflow-hidden">
                                     {user.photoUrl ? (
                                         <img 
-                                            src={typeof getDirectImageUrl === 'function' ? getDirectImageUrl(user.photoUrl) : user.photoUrl} 
+                                            src={getDirectImageUrl(user.photoUrl)} 
                                             alt={user.name} 
                                             className="w-full h-full object-cover" 
-                                            onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }} 
+                                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} 
                                         />
                                     ) : null}
                                     <span style={{ display: user.photoUrl ? 'none' : 'block' }}>
@@ -616,25 +546,200 @@ const App = () => {
 
                 <div className="flex-1 overflow-auto p-3 sm:p-6 lg:p-8 custom-scrollbar relative">
                     <div className="max-w-7xl mx-auto pb-28 sm:pb-28">
-                        {/* Beranda: Menampilkan data tersaring untuk Amil, dan seluruh data untuk Admin */}
-                        {activeTab === 'dashboard' && (
-                            <DashboardView 
-                                data={{ 
-                                    programs, 
-                                    donations: visibleDonations, 
-                                    tasks: visibleTasks, 
-                                    amils, 
-                                    pundis: visiblePundis, 
-                                    riwayatPundis: visibleRiwayatPundis, 
-                                    contacts: visibleContacts 
-                                }} 
-                                darkMode={darkMode} 
-                            />
-                        )}
+                        {activeTab === 'dashboard' && <DashboardView data={{ programs, donations, tasks, amils, pundis, riwayatPundis, contacts }} darkMode={darkMode} />}
                         {activeTab === 'donatur_donasi' && <DonaturDanDonasiView contactConfig={contactConfig} donationConfig={donationConfig} isAdmin={isAdmin} />}
                         {activeTab === 'pundi' && <PundiView pundis={pundis} setPundis={setPundis} riwayatPundis={riwayatPundis} setRiwayatPundis={setRiwayatPundis} contacts={contacts} programs={programs} user={user} syncDataToSheet={syncDataToSheet} darkMode={darkMode} setViewImage={setViewImage} amils={amils} setActiveTab={setActiveTab} />}
                         {activeTab === 'scanner' && <ScannerView pundis={pundis} riwayatPundis={riwayatPundis} setRiwayatPundis={setRiwayatPundis} user={user} syncDataToSheet={syncDataToSheet} setActiveTab={setActiveTab} />}
-                        {activeTab === 'program' && <ModuleView {...programConfig} canAdd={isAdmin} canEdit={isAdmin} canDelete={isAdmin} />}
+                        {activeTab === 'program' && (
+                            <div className="space-y-6 slide-up">
+                                <div className="flex overflow-x-auto gap-2 bg-white dark:bg-gray-800 p-1.5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm w-full hide-scrollbar">
+                                    <button
+                                        onClick={() => setCampaignSubTab('campaigns')}
+                                        className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all whitespace-nowrap ${campaignSubTab === 'campaigns' ? 'bg-wiz-green text-white shadow-md' : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-700'}`}
+                                    >
+                                        <i className="fa-solid fa-boxes-packing"></i> Daftar Campaign
+                                    </button>
+                                    <button
+                                        onClick={() => setCampaignSubTab('amil_target')}
+                                        className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all whitespace-nowrap ${campaignSubTab === 'amil_target' ? 'bg-wiz-green text-white shadow-md' : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-700'}`}
+                                    >
+                                        <i className="fa-solid fa-users-viewfinder"></i> Target Pundi per Amil
+                                    </button>
+                                </div>
+
+                                {campaignSubTab === 'campaigns' && (
+                                    <div className="animate-in">
+                                        <ModuleView {...programConfig} canAdd={isAdmin} canEdit={isAdmin} canDelete={isAdmin} />
+                                    </div>
+                                )}
+
+                                {campaignSubTab === 'amil_target' && (
+                                    <div className="space-y-6 animate-in">
+                                        <div>
+                                            <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100">Monitoring Target & Kinerja Amil (Pundi)</h3>
+                                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Pantau target spesifik, kotak pundi aktif, dan akumulasi perolehan masing-masing amil.</p>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {amils.map(amil => {
+                                                const amilPundis = pundis.filter(p => {
+                                                    const creator = p.createdBy || contacts.find(c => c.name === p.donorName)?.createdBy;
+                                                    return creator === amil.name;
+                                                });
+                                                const activePundiCount = amilPundis.filter(p => p.status === 'Aktif').length;
+
+                                                const nowMonth = new Date().getMonth();
+                                                const nowYear = new Date().getFullYear();
+                                                const amilRiwayat = riwayatPundis.filter(r => r.amilName === amil.name && r.status === 'Berhasil');
+                                                const totalKumulatif = amilRiwayat.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+                                                const totalBulanIni = amilRiwayat.filter(r => {
+                                                    const d = new Date(r.date);
+                                                    return d.getMonth() === nowMonth && d.getFullYear() === nowYear;
+                                                }).reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+                                                const amilCampaigns = calculatedPrograms.filter(p => p.assignedAmil === amil.name && p.status === 'Aktif');
+                                                const totalAmilTarget = amilCampaigns.reduce((sum, p) => sum + Number(p.target || 0), 0);
+                                                const totalAmilCollected = amilCampaigns.reduce((sum, p) => sum + Number(p.collected || 0), 0);
+                                                const percentTarget = totalAmilTarget > 0 ? Math.min(Math.round((totalAmilCollected / totalAmilTarget) * 100), 100) : 0;
+
+                                                return (
+                                                    <div key={amil.id} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm p-5 hover:shadow-md transition-all flex flex-col justify-between">
+                                                        <div>
+                                                            <div className="flex items-center justify-between mb-4">
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className="w-11 h-11 rounded-xl bg-wiz-green/10 text-wiz-green dark:text-emerald-400 flex items-center justify-center font-bold text-lg">
+                                                                        {amil.name.charAt(0).toUpperCase()}
+                                                                    </div>
+                                                                    <div>
+                                                                        <h4 className="font-bold text-gray-800 dark:text-gray-100 text-sm">{amil.name}</h4>
+                                                                        <span className="text-[11px] font-semibold text-wiz-orange dark:text-amber-400 uppercase">{amil.role}</span>
+                                                                    </div>
+                                                                </div>
+                                                                <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2.5 py-1 rounded-lg font-bold">
+                                                                    {activePundiCount} Kotak Aktif
+                                                                </span>
+                                                            </div>
+
+                                                            {totalAmilTarget > 0 ? (
+                                                                <div className="mb-4 p-3 bg-wiz-green/5 dark:bg-emerald-950/20 border border-wiz-green/20 rounded-xl">
+                                                                    <div className="flex justify-between items-center text-xs mb-1.5">
+                                                                        <span className="text-gray-500 dark:text-gray-400 font-medium">Target Khusus Amil</span>
+                                                                        <span className="font-bold text-wiz-green dark:text-emerald-400">{percentTarget}%</span>
+                                                                    </div>
+                                                                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-2 overflow-hidden">
+                                                                        <div className="bg-wiz-green dark:bg-emerald-500 h-2 rounded-full transition-all duration-700" style={{ width: `${percentTarget}%` }}></div>
+                                                                    </div>
+                                                                    <div className="flex justify-between text-[11px] font-semibold text-gray-600 dark:text-gray-300">
+                                                                        <span>Terkumpul: {formatRp(totalAmilCollected)}</span>
+                                                                        <span>Target: {formatRp(totalAmilTarget)}</span>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="mb-4 p-2.5 bg-gray-50 dark:bg-gray-700/50 rounded-xl text-center">
+                                                                    <p className="text-[11px] text-gray-400">Belum ada campaign khusus yang dibebankan ke amil ini.</p>
+                                                                </div>
+                                                            )}
+
+                                                            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 dark:border-gray-700 text-xs">
+                                                                <div>
+                                                                    <p className="text-[10px] uppercase font-bold text-gray-400">Tarik Bulan Ini</p>
+                                                                    <p className="font-bold text-gray-800 dark:text-gray-200 text-sm mt-0.5">{formatRp(totalBulanIni)}</p>
+                                                                </div>
+                                                                <div className="text-right">
+                                                                    <p className="text-[10px] uppercase font-bold text-gray-400">Kumulatif Pundi</p>
+                                                                    <p className="font-bold text-wiz-green dark:text-emerald-400 text-sm mt-0.5">{formatRp(totalKumulatif)}</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {isAdmin && (
+                                                            <div className="mt-4 pt-3 border-t border-gray-50 dark:border-gray-700/50">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setCampaignSubTab('campaigns');
+                                                                    }}
+                                                                    className="w-full py-1.5 text-xs text-center font-semibold text-wiz-green dark:text-emerald-400 hover:bg-wiz-green/10 rounded-lg transition-colors"
+                                                                >
+                                                                    + Buat Campaign untuk {amil.name}
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <Modal isOpen={!!selectedCampaignBreakdown} onClose={() => setSelectedCampaignBreakdown(null)} title={`Rincian Capaian: ${selectedCampaignBreakdown?.name || ''}`}>
+                                    {selectedCampaignBreakdown && (
+                                        <div className="space-y-4">
+                                            <div className="p-4 bg-gray-50 dark:bg-gray-700/60 rounded-xl flex justify-between items-center text-sm">
+                                                <div>
+                                                    <p className="text-xs text-gray-400 uppercase font-bold">Total Capaian Campaign</p>
+                                                    <p className="text-lg font-black text-wiz-green dark:text-emerald-400">{formatRp(selectedCampaignBreakdown.collected)}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-xs text-gray-400 uppercase font-bold">Target</p>
+                                                    <p className="text-sm font-bold text-gray-700 dark:text-gray-200">{formatRp(selectedCampaignBreakdown.target)}</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">Kontribusi Per Amil:</h4>
+                                                {(() => {
+                                                    const isPundi = selectedCampaignBreakdown.isPundiCampaign;
+                                                    const contributingAmils = amils.map(amil => {
+                                                        const donasiAmil = donations
+                                                            .filter(d => d.programName === selectedCampaignBreakdown.name && d.status === 'Berhasil' && d.amilName === amil.name)
+                                                            .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+
+                                                        const pundiAmil = isPundi ? riwayatPundis
+                                                            .filter(r => r.status === 'Berhasil' && r.amilName === amil.name)
+                                                            .reduce((sum, r) => sum + Number(r.amount || 0), 0) : 0;
+
+                                                        const totalKontribusi = isPundi ? (donasiAmil + pundiAmil) : donasiAmil;
+                                                        const pShare = selectedCampaignBreakdown.collected > 0 ? Math.round((totalKontribusi / selectedCampaignBreakdown.collected) * 100) : 0;
+
+                                                        return { ...amil, donasiAmil, pundiAmil, totalKontribusi, pShare };
+                                                    }).filter(a => a.totalKontribusi > 0);
+
+                                                    if (contributingAmils.length === 0) {
+                                                        return (
+                                                            <div className="p-5 text-center text-gray-400 bg-gray-50 dark:bg-gray-700/30 rounded-xl text-xs">
+                                                                Belum ada kontribusi donasi/pundi dari Amil untuk campaign ini.
+                                                            </div>
+                                                        );
+                                                    }
+
+                                                    return contributingAmils.map(amil => (
+                                                        <div key={amil.id} className="p-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl flex items-center justify-between">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-8 h-8 rounded-full bg-wiz-green/10 text-wiz-green dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
+                                                                    {amil.name.charAt(0)}
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-sm font-bold text-gray-800 dark:text-gray-200">{amil.name}</p>
+                                                                    <p className="text-[11px] text-gray-400">{amil.pShare}% dari total capaian</p>
+                                                                </div>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <p className="font-bold text-sm text-wiz-green dark:text-emerald-400">{formatRp(amil.totalKontribusi)}</p>
+                                                                {isPundi && <span className="text-[10px] text-wiz-orange">Pundi: {formatRp(amil.pundiAmil)}</span>}
+                                                            </div>
+                                                        </div>
+                                                    ));
+                                                })()}
+                                            </div>
+
+                                            <div className="pt-3 flex justify-end">
+                                                <Button variant="secondary" onClick={() => setSelectedCampaignBreakdown(null)}>Tutup</Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </Modal>
+                            </div>
+                        )}
                         {activeTab === 'tugas' && <ModuleView {...taskConfig} canAdd={isAdmin} canEdit={isAdmin} canDelete={isAdmin} />}
                         {activeTab === 'amil' && isAdmin && <ModuleView {...amilConfig} />}
                     </div>
@@ -688,7 +793,7 @@ const App = () => {
                 </div>
             </main>
 
-            {/* MODAL GANTI SANDI */}
+            {/* MODAL PASSWORD */}
             <Modal isOpen={isPasswordModalOpen} onClose={() => setIsPasswordModalOpen(false)} title="Pengaturan Keamanan">
                 <form onSubmit={handleChangePassword} className="space-y-4">
                     {pwdError && <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 p-3 rounded-xl border border-red-100 dark:border-red-800 font-medium flex items-center gap-2"><i className="fa-solid fa-triangle-exclamation"></i> {pwdError}</p>}
@@ -707,7 +812,7 @@ const App = () => {
                 </form>
             </Modal>
 
-            {/* MODAL KONFIRMASI HAPUS */}
+            {/* MODAL HAPUS DATA */}
             <Modal isOpen={!!deletePrompt} onClose={() => setDeletePrompt(null)}>
                 <div className="p-4 flex flex-col items-center justify-center text-center">
                     <div className="bg-red-50 dark:bg-red-950/50 p-5 rounded-full text-red-500 mb-5 relative">
@@ -715,7 +820,7 @@ const App = () => {
                         <i className="fa-solid fa-trash-can text-4xl relative z-10"></i>
                     </div>
                     <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 mb-2">Konfirmasi Hapus</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 max-w-sm font-medium">Data ini akan dihapus secara permanen dari server awan Google Sheets Anda.</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 max-w-sm font-medium">Langkah ini akan menghapus data secara permanen dari server awan Google Sheet Anda.</p>
                     <div className="flex gap-3 w-full">
                         <Button variant="secondary" className="flex-1 py-3" onClick={() => setDeletePrompt(null)}>Batal</Button>
                         <Button variant="danger" className="flex-1 py-3" onClick={confirmDelete}>Ya, Hapus Permanen</Button>
@@ -723,7 +828,7 @@ const App = () => {
                 </div>
             </Modal>
 
-            {/* MODAL PREVIEW BERKAS / GAMBAR */}
+            {/* POP UP DRIVE PREVIEW */}
             {viewImage && (
                 <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-gray-900/90 dark:bg-black/95 backdrop-blur-md animate-in" onClick={() => setViewImage(null)}>
                     <div className="relative max-w-4xl w-full h-[85vh] flex justify-center items-center slide-up">
@@ -737,7 +842,7 @@ const App = () => {
                                 <p className="text-sm text-gray-400 dark:text-gray-500 font-medium">Memuat berkas dari Drive...</p>
                             </div>
                             <iframe 
-                                src={typeof getDrivePreviewUrl === 'function' ? getDrivePreviewUrl(viewImage.original) : viewImage.original} 
+                                src={getDrivePreviewUrl(viewImage.original)} 
                                 className="w-full h-full border-0 relative z-10 bg-transparent" 
                                 allow="autoplay"
                                 title="Penampil Berkas"
@@ -752,7 +857,5 @@ const App = () => {
 
 // Render App ke DOM
 const rootElement = document.getElementById('root');
-if (rootElement) {
-    const root = ReactDOM.createRoot(rootElement);
-    root.render(<App />);
-}
+const root = ReactDOM.createRoot(rootElement);
+root.render(<App />);
