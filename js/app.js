@@ -1,4 +1,4 @@
-// Controller Utama Aplikasi CRM WIZ Berau
+// Controller Utama Aplikasi CRM WIZ Berau (Versi Cepat & Filter Akses Amil)
 
 const App = () => {
     const safeGetJSON = (key, fallback) => {
@@ -21,7 +21,8 @@ const App = () => {
     };
 
     const [user, setUser] = useState(() => safeGetJSON('wiz_user_session', null));
-    const [isInitializing, setIsInitializing] = useState(() => !safeGetJSON('wiz_user_session', null));
+    // Dibuat false agar aplikasi terbuka instan (<0.5 detik) tanpa menunggu server awan
+    const [isInitializing, setIsInitializing] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isOfflineMode, setIsOfflineMode] = useState(false);
     const [activeTab, setActiveTab] = useState('dashboard');
@@ -40,7 +41,7 @@ const App = () => {
     const [deletePrompt, setDeletePrompt] = useState(null);
     const [viewImage, setViewImage] = useState(null);
 
-    const [amils, setAmils] = useState(() => safeGetJSON('wiz_cache_Amil', fallbackAmils));
+    const [amils, setAmils] = useState(() => safeGetJSON('wiz_cache_Amil', typeof fallbackAmils !== 'undefined' ? fallbackAmils : []));
     const [contacts, setContacts] = useState(() => safeGetJSON('wiz_cache_Kontak', []));
     const [programs, setPrograms] = useState(() => safeGetJSON('wiz_cache_Program', []));
     const [donations, setDonations] = useState(() => safeGetJSON('wiz_cache_Donasi', []));
@@ -92,7 +93,9 @@ const App = () => {
                 if (d.RiwayatPundi) { setRiwayatPundis(d.RiwayatPundi); safeSetJSON('wiz_cache_RiwayatPundi', d.RiwayatPundi); }
                 
                 setIsOfflineMode(false);
-            } else { setIsOfflineMode(true); }
+            } else { 
+                setIsOfflineMode(true); 
+            }
         } catch (err) {
             setIsOfflineMode(true);
         } finally {
@@ -159,6 +162,7 @@ const App = () => {
     const createSaveHandler = (setter, state, sheetName) => (data, isEdit) => {
         let newDataToSave = { ...data };
         if (!isEdit && sheetName === 'Kontak' && user) newDataToSave.createdBy = user.name;
+        if (!isEdit && sheetName === 'Donasi' && user && !newDataToSave.amilName) newDataToSave.amilName = user.name;
         let newData = isEdit ? state.map(item => item.id === newDataToSave.id ? newDataToSave : item) : [...state, newDataToSave];
         setter(newData);
         safeSetJSON('wiz_cache_' + sheetName, newData);
@@ -183,47 +187,81 @@ const App = () => {
         setDeletePrompt(null);
     };
 
+    const isAdmin = user?.role === 'Admin';
+
+    // Filter Data: Admin melihat semua, Amil hanya melihat data miliknya sendiri
+    const visibleContacts = useMemo(() => {
+        if (isAdmin) return contacts;
+        return contacts.filter(c => c.createdBy === user?.name);
+    }, [contacts, isAdmin, user]);
+
+    const visibleDonations = useMemo(() => {
+        if (isAdmin) return donations;
+        return donations.filter(d => d.amilName === user?.name);
+    }, [donations, isAdmin, user]);
+
+    const visibleTasks = useMemo(() => {
+        if (isAdmin) return tasks;
+        return tasks.filter(t => t.assignedTo === user?.name);
+    }, [tasks, isAdmin, user]);
+
+    const visiblePundis = useMemo(() => {
+        if (isAdmin) return pundis;
+        return pundis.filter(p => {
+            const creator = p.createdBy || contacts.find(c => c.name === p.donorName)?.createdBy;
+            return creator === user?.name;
+        });
+    }, [pundis, isAdmin, user, contacts]);
+
+    const visibleRiwayatPundis = useMemo(() => {
+        if (isAdmin) return riwayatPundis;
+        return riwayatPundis.filter(r => r.amilName === user?.name);
+    }, [riwayatPundis, isAdmin, user]);
+
+    const contactOptions = visibleContacts.map(c => c.name);
+
     const calculatedPrograms = useMemo(() => {
-        const totalPundiCollected = riwayatPundis
+        const sourceRiwayat = isAdmin ? riwayatPundis : visibleRiwayatPundis;
+        const sourceDonations = isAdmin ? donations : visibleDonations;
+
+        const totalPundiCollected = sourceRiwayat
             .filter(r => r.status === 'Berhasil')
             .reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
         return programs.map(p => {
-            const isPundiCampaign = (p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'));
+            const isPundiUmum = p.category === 'Pundi Umum' || (p.name && p.name.toLowerCase().includes('pundi umum'));
+            const isPundiPribadi = p.category === 'Pundi Pribadi' || (p.name && p.name.toLowerCase().includes('pundi pribadi'));
+            const isPundiKolektif = (p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'));
             const isAmilSpecific = p.assignedAmil && p.assignedAmil !== 'Semua Amil (Target Kolektif)' && p.assignedAmil !== 'Semua Amil';
             
-            const donationCollected = donations
-                .filter(d => d.programName === p.name && d.status === 'Berhasil')
-                .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
-                .reduce((sum, d) => sum + Number(d.amount || 0), 0);
-                
-            const pundiCollected = riwayatPundis
-                .filter(r => r.status === 'Berhasil')
-                .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
-                .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+            let collected = 0;
+            if (isPundiUmum) {
+                collected = sourceRiwayat
+                    .filter(r => r.status === 'Berhasil' && r.tipePundi === 'Pundi Umum')
+                    .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
+                    .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+            } else if (isPundiPribadi) {
+                collected = sourceRiwayat
+                    .filter(r => r.status === 'Berhasil' && r.tipePundi === 'Pundi Pribadi')
+                    .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
+                    .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+            } else if (isPundiKolektif) {
+                collected = sourceRiwayat
+                    .filter(r => r.status === 'Berhasil')
+                    .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
+                    .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+            } else {
+                collected = sourceDonations
+                    .filter(d => d.programName === p.name && d.status === 'Berhasil')
+                    .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
+                    .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+            }
 
-            const collected = isPundiCampaign ? (donationCollected + (isAmilSpecific ? pundiCollected : totalPundiCollected)) : donationCollected;
-            return { ...p, collected, isPundiCampaign, isAmilSpecific };
+            return { ...p, collected, isPundiUmum, isPundiPribadi, isPundiCampaign: isPundiKolektif, isAmilSpecific };
         });
-    }, [programs, donations, riwayatPundis]);
-
-    if (isInitializing) return (
-        <div className="h-screen w-full flex flex-col items-center justify-center bg-wiz-light dark:bg-gray-900 transition-colors">
-            <div className="w-24 h-24 mb-6 relative">
-                <div className="absolute inset-0 rounded-full border-t-4 border-wiz-green animate-spin"></div>
-                <div className="absolute inset-2 rounded-full border-r-4 border-wiz-orange animate-spin animation-delay-150"></div>
-                <i className="fa-solid fa-leaf absolute inset-0 flex items-center justify-center text-3xl text-wiz-green dark:text-emerald-400"></i>
-            </div>
-            <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-1">Menyiapkan Workspace...</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Sinkronisasi data awan</p>
-        </div>
-    );
+    }, [programs, donations, riwayatPundis, visibleDonations, visibleRiwayatPundis, isAdmin]);
 
     if (!user) return <LoginScreen onLogin={handleLogin} amilsData={amils} darkMode={darkMode} setDarkMode={setDarkMode} onRefresh={() => fetchAllData(true)} isRefreshing={isRefreshing} />;
-
-    const isAdmin = user?.role === 'Admin';
-    const visibleContacts = isAdmin ? contacts : contacts.filter(c => c.createdBy === user.name);
-    const contactOptions = visibleContacts.map(c => c.name);
 
     const handleSaveContact = (formData, isEdit) => {
         let newDataToSave = { ...formData };
@@ -234,8 +272,10 @@ const App = () => {
     };
 
     const contactConfig = {
-        title: 'Data Kontak', data: visibleContacts,
-        onSave: handleSaveContact, onDelete: createDeleteHandler(setContacts, contacts, 'Kontak'),
+        title: 'Data Kontak', 
+        data: visibleContacts,
+        onSave: handleSaveContact, 
+        onDelete: createDeleteHandler(setContacts, contacts, 'Kontak'),
         columns: [
             { key: 'name', label: 'Nama' },
             { key: 'phone', label: 'No. Telp / WA', render: r => <span className="font-medium text-gray-800 dark:text-gray-200">{r.phone}</span> },
@@ -260,8 +300,10 @@ const App = () => {
     };
 
     const programConfig = {
-        title: 'Campaign WIZ BERAU', data: calculatedPrograms,
-        onSave: createSaveHandler(setPrograms, programs, 'Program'), onDelete: createDeleteHandler(setPrograms, programs, 'Program'),
+        title: 'Campaign WIZ BERAU', 
+        data: calculatedPrograms,
+        onSave: createSaveHandler(setPrograms, programs, 'Program'), 
+        onDelete: createDeleteHandler(setPrograms, programs, 'Program'),
         columns: [
             { key: 'name', label: 'Nama Campaign', render: r => (
                 <div>
@@ -310,7 +352,7 @@ const App = () => {
         ],
         schema: [
             { name: 'name', label: 'Nama Campaign / Program', required: true, fullWidth: true },
-            { name: 'category', label: 'Jenis / Sumber Dana', type: 'select', options: ['Reguler (Donasi Umum)', 'Pundi (Kotak Amal)'], required: true },
+            { name: 'category', label: 'Jenis / Sumber Dana', type: 'select', options: ['Reguler (Donasi Umum)', 'Pundi Umum', 'Pundi Pribadi', 'Pundi (Kotak Amal)'], required: true },
             { name: 'assignedAmil', label: 'Penanggung Jawab / Amil', type: 'select', options: ['Semua Amil (Target Kolektif)', ...amils.map(a => a.name)], required: true },
             { name: 'target', label: 'Target Pendanaan', isCurrency: true, required: true },
             { name: 'deadline', label: 'Berakhir Pada', type: 'date', required: true },
@@ -319,9 +361,12 @@ const App = () => {
     };
 
     const donationConfig = {
-        title: 'Data Transaksi', data: donations,
+        title: 'Data Transaksi', 
+        // Menggunakan visibleDonations agar Amil hanya melihat transaksi miliknya
+        data: visibleDonations,
         defaultValues: { amilName: user?.name, date: new Date().toISOString().split('T')[0] },
-        onSave: createSaveHandler(setDonations, donations, 'Donasi'), onDelete: createDeleteHandler(setDonations, donations, 'Donasi'),
+        onSave: createSaveHandler(setDonations, donations, 'Donasi'), 
+        onDelete: createDeleteHandler(setDonations, donations, 'Donasi'),
         columns: [
             { key: 'date', label: 'Tanggal', render: r => formatDate(r.date) },
             { key: 'donorName', label: 'Donatur', render: r => <span className="font-semibold">{r.donorName}</span> },
@@ -360,16 +405,16 @@ const App = () => {
             { name: 'amount', label: 'Nominal', isCurrency: true, required: true },
             { name: 'date', label: 'Tanggal Bayar', type: 'date', required: true },
             { name: 'status', label: 'Status Transfer', type: 'select', options: ['Berhasil', 'Menunggu Validasi', 'Gagal'], required: true },
-            { name: 'amilName', label: 'PIC Amil', type: 'select', options: amils.map(a => a.name), required: true },
+            { name: 'amilName', label: 'PIC Amil', type: 'select', options: isAdmin ? amils.map(a => a.name) : [user?.name], required: true },
             { name: 'receiptUrl', label: 'Bukti Validasi (Opsional)', type: 'file', fullWidth: true }
         ]
     };
 
-    const visibleTasks = isAdmin ? tasks : tasks.filter(t => t.assignedTo === user.name);
-
     const taskConfig = {
-        title: 'Tugas Operasional', data: visibleTasks,
-        onSave: createSaveHandler(setTasks, tasks, 'Tugas'), onDelete: createDeleteHandler(setTasks, tasks, 'Tugas'),
+        title: 'Tugas Operasional', 
+        data: visibleTasks,
+        onSave: createSaveHandler(setTasks, tasks, 'Tugas'), 
+        onDelete: createDeleteHandler(setTasks, tasks, 'Tugas'),
         columns: [
             { key: 'name', label: 'Uraian Tugas', render: r => <span className="font-semibold text-gray-700 dark:text-gray-200">{r.name}</span> },
             { key: 'assignedTo', label: 'Pelaksana' },
@@ -387,8 +432,10 @@ const App = () => {
     };
 
     const amilConfig = {
-        title: 'Akses Sistem', data: amils,
-        onSave: createSaveHandler(setAmils, amils, 'Amil'), onDelete: createDeleteHandler(setAmils, amils, 'Amil'),
+        title: 'Akses Sistem', 
+        data: amils,
+        onSave: createSaveHandler(setAmils, amils, 'Amil'), 
+        onDelete: createDeleteHandler(setAmils, amils, 'Amil'),
         columns: [
             { 
                 key: 'photoUrl', 
@@ -546,7 +593,21 @@ const App = () => {
 
                 <div className="flex-1 overflow-auto p-3 sm:p-6 lg:p-8 custom-scrollbar relative">
                     <div className="max-w-7xl mx-auto pb-28 sm:pb-28">
-                        {activeTab === 'dashboard' && <DashboardView data={{ programs, donations, tasks, amils, pundis, riwayatPundis, contacts }} darkMode={darkMode} />}
+                        {/* Meneruskan data terfilter sesuai amil (kecuali admin yang melihat semua) */}
+                        {activeTab === 'dashboard' && (
+                            <DashboardView 
+                                data={{ 
+                                    programs, 
+                                    donations: visibleDonations, 
+                                    tasks: visibleTasks, 
+                                    amils, 
+                                    pundis: visiblePundis, 
+                                    riwayatPundis: visibleRiwayatPundis, 
+                                    contacts: visibleContacts 
+                                }} 
+                                darkMode={darkMode} 
+                            />
+                        )}
                         {activeTab === 'donatur_donasi' && <DonaturDanDonasiView contactConfig={contactConfig} donationConfig={donationConfig} isAdmin={isAdmin} />}
                         {activeTab === 'pundi' && <PundiView pundis={pundis} setPundis={setPundis} riwayatPundis={riwayatPundis} setRiwayatPundis={setRiwayatPundis} contacts={contacts} programs={programs} user={user} syncDataToSheet={syncDataToSheet} darkMode={darkMode} setViewImage={setViewImage} amils={amils} setActiveTab={setActiveTab} />}
                         {activeTab === 'scanner' && <ScannerView pundis={pundis} riwayatPundis={riwayatPundis} setRiwayatPundis={setRiwayatPundis} user={user} syncDataToSheet={syncDataToSheet} setActiveTab={setActiveTab} />}
