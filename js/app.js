@@ -53,6 +53,13 @@ const App = () => {
     const [selectedCampaignBreakdown, setSelectedCampaignBreakdown] = useState(null);
     const [campaignSubTab, setCampaignSubTab] = useState('campaigns');
 
+    // State Filter Periode & Kategori Campaign WIZ
+    const [campaignMonth, setCampaignMonth] = useState(() => new Date().getMonth());
+    const [campaignYear, setCampaignYear] = useState(() => new Date().getFullYear());
+    const [campaignCategoryFilter, setCampaignCategoryFilter] = useState('Semua');
+    const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+    const yearOptions = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 3 + i);
+
     useEffect(() => {
         if (darkMode) {
             document.documentElement.classList.add('dark');
@@ -220,46 +227,103 @@ const App = () => {
 
     const contactOptions = visibleContacts.map(c => c.name);
 
+    /* ==========================================================
+       KALKULASI CAMPAIGN & SINKRONISASI PUNDI UMUM/PRIBADI
+       ========================================================== */
     const calculatedPrograms = useMemo(() => {
         const sourceRiwayat = isAdmin ? riwayatPundis : visibleRiwayatPundis;
         const sourceDonations = isAdmin ? donations : visibleDonations;
 
-        const totalPundiCollected = sourceRiwayat
-            .filter(r => r.status === 'Berhasil')
-            .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+        // Filter riwayat & donasi sesuai bulan & tahun yang dipilih di Campaign
+        const filterByPeriod = (itemDate) => {
+            if (!itemDate) return false;
+            const d = new Date(itemDate);
+            if (isNaN(d.getTime())) return false;
+            const matchYear = campaignYear === 'Semua' ? true : d.getFullYear() === Number(campaignYear);
+            const matchMonth = campaignMonth === 'Semua' ? true : d.getMonth() === Number(campaignMonth);
+            return matchYear && matchMonth;
+        };
+
+        const periodRiwayat = sourceRiwayat.filter(r => r.status === 'Berhasil' && filterByPeriod(r.date));
+        const periodDonations = sourceDonations.filter(d => d.status === 'Berhasil' && filterByPeriod(d.date));
+
+        // Deteksi tipe pundi (jika tipePundi di riwayat kosong, cek dari data master pundi)
+        const getTipePundiOfRiwayat = (r) => {
+            if (r.tipePundi && String(r.tipePundi).trim() !== '') return r.tipePundi;
+            const matched = pundis.find(p => String(p.id) === String(r.pundiId) || String(p.noUrut) === String(r.noUrut));
+            return matched?.tipePundi || 'Pundi Umum';
+        };
 
         return programs.map(p => {
             const isPundiUmum = p.category === 'Pundi Umum' || (p.name && p.name.toLowerCase().includes('pundi umum'));
             const isPundiPribadi = p.category === 'Pundi Pribadi' || (p.name && p.name.toLowerCase().includes('pundi pribadi'));
-            const isPundiKolektif = (p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'));
+            const isPundiKolektif = isPundiUmum || isPundiPribadi || (p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'));
             const isAmilSpecific = p.assignedAmil && p.assignedAmil !== 'Semua Amil (Target Kolektif)' && p.assignedAmil !== 'Semua Amil';
             
             let collected = 0;
             if (isPundiUmum) {
-                collected = sourceRiwayat
-                    .filter(r => r.status === 'Berhasil' && r.tipePundi === 'Pundi Umum')
+                const fromPundi = periodRiwayat
+                    .filter(r => getTipePundiOfRiwayat(r) === 'Pundi Umum')
                     .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
                     .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+                const fromDonasi = periodDonations
+                    .filter(d => d.programName === p.name)
+                    .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
+                    .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+                collected = fromPundi + fromDonasi;
             } else if (isPundiPribadi) {
-                collected = sourceRiwayat
-                    .filter(r => r.status === 'Berhasil' && r.tipePundi === 'Pundi Pribadi')
+                const fromPundi = periodRiwayat
+                    .filter(r => getTipePundiOfRiwayat(r) === 'Pundi Pribadi')
                     .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
                     .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+                const fromDonasi = periodDonations
+                    .filter(d => d.programName === p.name)
+                    .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
+                    .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+                collected = fromPundi + fromDonasi;
             } else if (isPundiKolektif) {
-                collected = sourceRiwayat
-                    .filter(r => r.status === 'Berhasil')
+                const fromPundi = periodRiwayat
                     .filter(r => !isAmilSpecific || r.amilName === p.assignedAmil)
                     .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+                const fromDonasi = periodDonations
+                    .filter(d => d.programName === p.name)
+                    .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
+                    .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+                collected = fromPundi + fromDonasi;
             } else {
-                collected = sourceDonations
-                    .filter(d => d.programName === p.name && d.status === 'Berhasil')
+                collected = periodDonations
+                    .filter(d => d.programName === p.name)
                     .filter(d => !isAmilSpecific || d.amilName === p.assignedAmil)
                     .reduce((sum, d) => sum + Number(d.amount || 0), 0);
             }
 
-            return { ...p, collected, isPundiUmum, isPundiPribadi, isPundiCampaign: isPundiKolektif, isAmilSpecific };
+            const targetTotal = Number(p.target || 0);
+            const targetDisplay = campaignMonth === 'Semua' ? targetTotal : Math.round(targetTotal / 12);
+            const percent = targetDisplay > 0 ? Math.min(Math.round((collected / targetDisplay) * 100), 100) : 0;
+
+            return { 
+                ...p, 
+                collected, 
+                targetTotal,
+                targetDisplay,
+                percent,
+                isPundiUmum, 
+                isPundiPribadi, 
+                isPundiCampaign: isPundiKolektif, 
+                isAmilSpecific 
+            };
         });
-    }, [programs, donations, riwayatPundis, visibleDonations, visibleRiwayatPundis, isAdmin]);
+    }, [programs, donations, riwayatPundis, visibleDonations, visibleRiwayatPundis, isAdmin, pundis, campaignMonth, campaignYear]);
+
+    // Filter daftar program berdasarkan kategori yang dipilih
+    const filteredCalculatedPrograms = useMemo(() => {
+        return calculatedPrograms.filter(p => {
+            if (campaignCategoryFilter === 'Semua') return true;
+            if (campaignCategoryFilter === 'Pundi Umum') return p.isPundiUmum;
+            if (campaignCategoryFilter === 'Pundi Pribadi') return p.isPundiPribadi;
+            return p.category === campaignCategoryFilter;
+        });
+    }, [calculatedPrograms, campaignCategoryFilter]);
 
     if (!user) return <LoginScreen onLogin={handleLogin} amilsData={amils} darkMode={darkMode} setDarkMode={setDarkMode} onRefresh={() => fetchAllData(true)} isRefreshing={isRefreshing} />;
 
@@ -301,23 +365,31 @@ const App = () => {
 
     const programConfig = {
         title: 'Campaign WIZ BERAU', 
-        data: calculatedPrograms,
+        data: filteredCalculatedPrograms,
         onSave: createSaveHandler(setPrograms, programs, 'Program'), 
         onDelete: createDeleteHandler(setPrograms, programs, 'Program'),
         columns: [
             { key: 'name', label: 'Nama Campaign', render: r => (
                 <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-gray-800 dark:text-gray-100">{r.name}</span>
-                        {r.isPundiCampaign && (
+                        {r.isPundiUmum ? (
+                            <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 text-[11px] font-bold rounded-md flex items-center gap-1 border border-blue-200 dark:border-blue-800">
+                                <i className="fa-solid fa-store"></i> Pundi Umum
+                            </span>
+                        ) : r.isPundiPribadi ? (
+                            <span className="px-2 py-0.5 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300 text-[11px] font-bold rounded-md flex items-center gap-1 border border-purple-200 dark:border-purple-800">
+                                <i className="fa-solid fa-house-user"></i> Pundi Pribadi
+                            </span>
+                        ) : r.isPundiCampaign ? (
                             <span className="px-2 py-0.5 bg-wiz-orange/10 dark:bg-amber-900/30 text-wiz-orange dark:text-amber-400 text-[11px] font-bold rounded-md flex items-center gap-1 border border-wiz-orange/20">
                                 <i className="fa-solid fa-box-open"></i> Sinkron Pundi
                             </span>
-                        )}
+                        ) : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-2 mt-1">
-                        <span className="text-[11px] text-gray-400 dark:text-gray-500">{r.category || (r.isPundiCampaign ? 'Pundi (Kotak Amal)' : 'Reguler')}</span>
-                        {r.assignedAmil && r.assignedAmil !== 'Semua Amil (Target Kolektif)' ? (
+                        <span className="text-[11px] text-gray-400 dark:text-gray-500">{r.category || (r.isPundiCampaign ? 'Pundi ZIS' : 'Reguler')}</span>
+                        {r.assignedAmil && r.assignedAmil !== 'Semua Amil (Target Kolektif)' && r.assignedAmil !== 'Semua Amil' ? (
                             <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 text-[11px] font-semibold rounded-md flex items-center gap-1 border border-blue-200 dark:border-blue-800">
                                 <i className="fa-solid fa-user-tag text-[10px]"></i> Amil: {r.assignedAmil}
                             </span>
@@ -329,12 +401,19 @@ const App = () => {
                     </div>
                 </div>
             )},
-            { key: 'target', label: 'Target', render: r => formatRp(r.target) },
+            { key: 'target', label: 'Target', render: r => (
+                <div>
+                    <span className="font-bold text-gray-700 dark:text-gray-200">{formatRp(r.targetDisplay)}</span>
+                    {campaignMonth !== 'Semua' && (
+                        <p className="text-[10px] text-gray-400">Tahunan: {formatRp(r.targetTotal)}</p>
+                    )}
+                </div>
+            )},
             { key: 'collected', label: 'Terkumpul', render: r => (
                 <div>
                     <span className="text-wiz-green dark:text-emerald-400 font-bold">{formatRp(r.collected)}</span>
-                    {r.target > 0 && (
-                        <span className="ml-2 text-xs text-gray-400 font-medium">({Math.min(Math.round((r.collected / r.target) * 100), 100)}%)</span>
+                    {r.targetDisplay > 0 && (
+                        <span className="ml-2 text-xs text-gray-400 font-medium">({r.percent}%)</span>
                     )}
                 </div>
             )},
@@ -354,7 +433,7 @@ const App = () => {
             { name: 'name', label: 'Nama Campaign / Program', required: true, fullWidth: true },
             { name: 'category', label: 'Jenis / Sumber Dana', type: 'select', options: ['Reguler (Donasi Umum)', 'Pundi Umum', 'Pundi Pribadi', 'Pundi (Kotak Amal)'], required: true },
             { name: 'assignedAmil', label: 'Penanggung Jawab / Amil', type: 'select', options: ['Semua Amil (Target Kolektif)', ...amils.map(a => a.name)], required: true },
-            { name: 'target', label: 'Target Pendanaan', isCurrency: true, required: true },
+            { name: 'target', label: 'Target Pendanaan (Tahunan)', isCurrency: true, required: true },
             { name: 'deadline', label: 'Berakhir Pada', type: 'date', required: true },
             { name: 'status', label: 'Status Aktif', type: 'select', options: ['Aktif', 'Selesai', 'Dibatalkan'], required: true }
         ]
@@ -628,8 +707,127 @@ const App = () => {
                                     </button>
                                 </div>
 
+                                {}
                                 {campaignSubTab === 'campaigns' && (
-                                    <div className="animate-in">
+                                    <div className="space-y-5 animate-in">
+                                        {/* Bar Filter Bulan & Tahun Campaign */}
+                                        <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                            <div>
+                                                <h3 className="font-bold text-gray-800 dark:text-gray-100 text-sm flex items-center gap-2">
+                                                    <span className="p-1.5 bg-wiz-green/10 text-wiz-green dark:text-emerald-400 rounded-lg">
+                                                        <i className="fa-solid fa-filter"></i>
+                                                    </span>
+                                                    Filter Periode Analitik Campaign
+                                                </h3>
+                                                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                                                    Pilih bulan & tahun untuk melihat perolehan donasi serta penarikan Pundi Umum & Pribadi yang tersinkronisasi.
+                                                </p>
+                                            </div>
+
+                                            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                                                {/* Pilihan Bulan */}
+                                                <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
+                                                    <i className="fa-solid fa-calendar-days text-xs text-wiz-green dark:text-emerald-400"></i>
+                                                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Bulan:</span>
+                                                    <select
+                                                        value={campaignMonth}
+                                                        onChange={(e) => setCampaignMonth(e.target.value === 'Semua' ? 'Semua' : Number(e.target.value))}
+                                                        className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer"
+                                                    >
+                                                        <option value="Semua" className="dark:bg-gray-800">Semua Bulan (Kumulatif)</option>
+                                                        {monthNames.map((m, idx) => (
+                                                            <option key={idx} value={idx} className="dark:bg-gray-800">{m}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+
+                                                {/* Pilihan Tahun */}
+                                                <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
+                                                    <i className="fa-solid fa-clock-rotate-left text-xs text-wiz-green dark:text-emerald-400"></i>
+                                                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Tahun:</span>
+                                                    <select
+                                                        value={campaignYear}
+                                                        onChange={(e) => setCampaignYear(e.target.value === 'Semua' ? 'Semua' : Number(e.target.value))}
+                                                        className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer"
+                                                    >
+                                                        <option value="Semua" className="dark:bg-gray-800">Semua Tahun</option>
+                                                        {yearOptions.map(y => (
+                                                            <option key={y} value={y} className="dark:bg-gray-800">Tahun {y}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+
+                                                {/* Pilihan Kategori / Sumber Dana */}
+                                                <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
+                                                    <i className="fa-solid fa-tags text-xs text-wiz-orange dark:text-amber-400"></i>
+                                                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Sumber:</span>
+                                                    <select
+                                                        value={campaignCategoryFilter}
+                                                        onChange={(e) => setCampaignCategoryFilter(e.target.value)}
+                                                        className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer"
+                                                    >
+                                                        <option value="Semua" className="dark:bg-gray-800">Semua Sumber</option>
+                                                        <option value="Pundi Umum" className="dark:bg-gray-800">Pundi Umum (Kotak Toko)</option>
+                                                        <option value="Pundi Pribadi" className="dark:bg-gray-800">Pundi Pribadi (Kotak Rumah)</option>
+                                                        <option value="Reguler (Donasi Umum)" className="dark:bg-gray-800">Reguler (Donasi Umum)</option>
+                                                        <option value="Pundi (Kotak Amal)" className="dark:bg-gray-800">Pundi Kolektif</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Banner Ringkasan Periode Terhimpun */}
+                                        {(() => {
+                                            const totalTerhimpun = filteredCalculatedPrograms.reduce((sum, p) => sum + Number(p.collected || 0), 0);
+                                            const totalTarget = filteredCalculatedPrograms.reduce((sum, p) => sum + Number(p.targetDisplay || 0), 0);
+                                            const totalPersen = totalTarget > 0 ? Math.min(Math.round((totalTerhimpun / totalTarget) * 100), 100) : 0;
+
+                                            const danaPundiUmum = filteredCalculatedPrograms.filter(p => p.isPundiUmum).reduce((sum, p) => sum + Number(p.collected || 0), 0);
+                                            const danaPundiPribadi = filteredCalculatedPrograms.filter(p => p.isPundiPribadi).reduce((sum, p) => sum + Number(p.collected || 0), 0);
+
+                                            return (
+                                                <div className="p-6 bg-gradient-to-r from-wiz-green_dark via-wiz-green to-teal-700 rounded-3xl text-white shadow-xl relative overflow-hidden">
+                                                    <div className="absolute -right-6 -bottom-6 text-9xl text-white/10 pointer-events-none">
+                                                        <i className="fa-solid fa-bullseye"></i>
+                                                    </div>
+                                                    <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                                        <div>
+                                                            <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black uppercase tracking-wider mb-2">
+                                                                <i className="fa-solid fa-chart-pie"></i> Capaian: {campaignMonth === 'Semua' ? 'Semua Bulan' : monthNames[campaignMonth]} {campaignYear !== 'Semua' ? campaignYear : ''}
+                                                            </div>
+                                                            <h3 className="text-3xl font-black">{formatRp(totalTerhimpun)}</h3>
+                                                            <p className="text-white/80 text-xs mt-1">
+                                                                Target Periode: <b>{formatRp(totalTarget)}</b> ({filteredCalculatedPrograms.length} Campaign Ditampilkan)
+                                                            </p>
+                                                        </div>
+
+                                                        <div className="bg-white/15 backdrop-blur-md px-5 py-3 rounded-2xl border border-white/20 flex items-center gap-5">
+                                                            <div className="text-right">
+                                                                <p className="text-[10px] uppercase font-bold text-white/75">Ketercapaian</p>
+                                                                <p className="text-2xl font-black text-amber-300">{totalPersen}%</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="w-full bg-black/20 rounded-full h-2 mt-4 relative z-10 overflow-hidden">
+                                                        <div className="bg-white h-2 rounded-full transition-all duration-1000 shadow-md" style={{ width: `${totalPersen}%` }}></div>
+                                                    </div>
+
+                                                    {/* Sub-info Pundi Umum vs Pribadi */}
+                                                    {(danaPundiUmum > 0 || danaPundiPribadi > 0) && (
+                                                        <div className="flex flex-wrap items-center gap-3 mt-4 pt-3 border-t border-white/20 text-xs relative z-10">
+                                                            <span className="bg-white/20 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5">
+                                                                <i className="fa-solid fa-store text-blue-200"></i> Pundi Umum: {formatRp(danaPundiUmum)}
+                                                            </span>
+                                                            <span className="bg-white/20 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5">
+                                                                <i className="fa-solid fa-house-user text-purple-200"></i> Pundi Pribadi: {formatRp(danaPundiPribadi)}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })()}
+
                                         <ModuleView {...programConfig} canAdd={isAdmin} canEdit={isAdmin} canDelete={isAdmin} />
                                     </div>
                                 )}
@@ -737,12 +935,12 @@ const App = () => {
                                         <div className="space-y-4">
                                             <div className="p-4 bg-gray-50 dark:bg-gray-700/60 rounded-xl flex justify-between items-center text-sm">
                                                 <div>
-                                                    <p className="text-xs text-gray-400 uppercase font-bold">Total Capaian Campaign</p>
+                                                    <p className="text-xs text-gray-400 uppercase font-bold">Total Capaian Campaign ({campaignMonth === 'Semua' ? 'Semua Bulan' : monthNames[campaignMonth]})</p>
                                                     <p className="text-lg font-black text-wiz-green dark:text-emerald-400">{formatRp(selectedCampaignBreakdown.collected)}</p>
                                                 </div>
                                                 <div className="text-right">
-                                                    <p className="text-xs text-gray-400 uppercase font-bold">Target</p>
-                                                    <p className="text-sm font-bold text-gray-700 dark:text-gray-200">{formatRp(selectedCampaignBreakdown.target)}</p>
+                                                    <p className="text-xs text-gray-400 uppercase font-bold">Target Periode</p>
+                                                    <p className="text-sm font-bold text-gray-700 dark:text-gray-200">{formatRp(selectedCampaignBreakdown.targetDisplay)}</p>
                                                 </div>
                                             </div>
 
@@ -750,16 +948,45 @@ const App = () => {
                                                 <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">Kontribusi Per Amil:</h4>
                                                 {(() => {
                                                     const isPundi = selectedCampaignBreakdown.isPundiCampaign;
+                                                    const isPundiUmum = selectedCampaignBreakdown.isPundiUmum;
+                                                    const isPundiPribadi = selectedCampaignBreakdown.isPundiPribadi;
+
+                                                    const filterByPeriod = (itemDate) => {
+                                                        if (!itemDate) return false;
+                                                        const d = new Date(itemDate);
+                                                        if (isNaN(d.getTime())) return false;
+                                                        const matchYear = campaignYear === 'Semua' ? true : d.getFullYear() === Number(campaignYear);
+                                                        const matchMonth = campaignMonth === 'Semua' ? true : d.getMonth() === Number(campaignMonth);
+                                                        return matchYear && matchMonth;
+                                                    };
+
+                                                    const getTipe = (r) => {
+                                                        if (r.tipePundi) return r.tipePundi;
+                                                        const m = pundis.find(p => String(p.id) === String(r.pundiId) || String(p.noUrut) === String(r.noUrut));
+                                                        return m?.tipePundi || 'Pundi Umum';
+                                                    };
+
                                                     const contributingAmils = amils.map(amil => {
                                                         const donasiAmil = donations
-                                                            .filter(d => d.programName === selectedCampaignBreakdown.name && d.status === 'Berhasil' && d.amilName === amil.name)
+                                                            .filter(d => d.programName === selectedCampaignBreakdown.name && d.status === 'Berhasil' && d.amilName === amil.name && filterByPeriod(d.date))
                                                             .reduce((sum, d) => sum + Number(d.amount || 0), 0);
 
-                                                        const pundiAmil = isPundi ? riwayatPundis
-                                                            .filter(r => r.status === 'Berhasil' && r.amilName === amil.name)
-                                                            .reduce((sum, r) => sum + Number(r.amount || 0), 0) : 0;
+                                                        let pundiAmil = 0;
+                                                        if (isPundiUmum) {
+                                                            pundiAmil = riwayatPundis
+                                                                .filter(r => r.status === 'Berhasil' && r.amilName === amil.name && getTipe(r) === 'Pundi Umum' && filterByPeriod(r.date))
+                                                                .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+                                                        } else if (isPundiPribadi) {
+                                                            pundiAmil = riwayatPundis
+                                                                .filter(r => r.status === 'Berhasil' && r.amilName === amil.name && getTipe(r) === 'Pundi Pribadi' && filterByPeriod(r.date))
+                                                                .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+                                                        } else if (isPundi) {
+                                                            pundiAmil = riwayatPundis
+                                                                .filter(r => r.status === 'Berhasil' && r.amilName === amil.name && filterByPeriod(r.date))
+                                                                .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+                                                        }
 
-                                                        const totalKontribusi = isPundi ? (donasiAmil + pundiAmil) : donasiAmil;
+                                                        const totalKontribusi = donasiAmil + pundiAmil;
                                                         const pShare = selectedCampaignBreakdown.collected > 0 ? Math.round((totalKontribusi / selectedCampaignBreakdown.collected) * 100) : 0;
 
                                                         return { ...amil, donasiAmil, pundiAmil, totalKontribusi, pShare };
@@ -768,7 +995,7 @@ const App = () => {
                                                     if (contributingAmils.length === 0) {
                                                         return (
                                                             <div className="p-5 text-center text-gray-400 bg-gray-50 dark:bg-gray-700/30 rounded-xl text-xs">
-                                                                Belum ada kontribusi donasi/pundi dari Amil untuk campaign ini.
+                                                                Belum ada kontribusi donasi/pundi dari Amil untuk campaign ini pada periode yang dipilih.
                                                             </div>
                                                         );
                                                     }
@@ -781,7 +1008,7 @@ const App = () => {
                                                                 </div>
                                                                 <div>
                                                                     <p className="text-sm font-bold text-gray-800 dark:text-gray-200">{amil.name}</p>
-                                                                    <p className="text-[11px] text-gray-400">{amil.pShare}% dari total capaian</p>
+                                                                    <p className="text-[11px] text-gray-400">{amil.pShare}% dari capaian periode</p>
                                                                 </div>
                                                             </div>
                                                             <div className="text-right">
