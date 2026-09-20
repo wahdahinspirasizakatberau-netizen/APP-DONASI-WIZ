@@ -1,5 +1,5 @@
-// Komponen Layar Login Portal Amil
-const { useState } = React; // INI KUNCI YANG HILANG SEBELUMNYA
+// Komponen Layar Login Portal Amil WIZ
+const { useState } = React; // BARIS INI WAJIB ADA AGAR TIDAK BLANK
 
 const LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isRefreshing }) => {
     const [email, setEmail] = useState('');
@@ -85,11 +85,10 @@ const LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isR
                                 </div>
                             </div>
                         </div>
-                        <Button type="submit" variant="accent" className="w-full py-3.5 text-[15px] mt-2 shadow-wiz-orange/30">
+                        <button type="submit" className="w-full py-3.5 text-[15px] mt-2 shadow-md bg-gradient-to-r from-wiz-orange to-[#fca545] hover:from-wiz-orange_dark hover:to-wiz-orange text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95">
                             Masuk ke Dashboard <i className="fa-solid fa-arrow-right-to-bracket ml-1"></i>
-                        </Button>
+                        </button>
 
-                        {/* Tombol Refresh & Mode Malam */}
                         <div className="flex items-center justify-center gap-3 pt-3 border-t border-gray-100 dark:border-gray-700/70">
                             <button
                                 type="button"
