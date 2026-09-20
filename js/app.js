@@ -1,5 +1,4 @@
 // Controller Utama Aplikasi CRM WIZ Berau
-
 const { useState, useEffect, useMemo, useRef } = React;
 
 const App = () => {
