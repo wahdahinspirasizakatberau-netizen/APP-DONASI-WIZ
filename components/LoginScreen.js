@@ -1,4 +1,5 @@
 // Komponen Layar Login Portal Amil
+const { useState } = React; // INI KUNCI YANG HILANG SEBELUMNYA
 
 const LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isRefreshing }) => {
     const [email, setEmail] = useState('');
