@@ -1,5 +1,7 @@
 // Controller Utama Aplikasi CRM WIZ Berau
 
+const { useState, useEffect, useMemo, useRef } = React;
+
 const App = () => {
     const safeGetJSON = (key, fallback) => {
         try {
@@ -40,12 +42,12 @@ const App = () => {
     const [deletePrompt, setDeletePrompt] = useState(null);
     const [viewImage, setViewImage] = useState(null);
 
-    const [amils, setAmils] = useState(() => safeGetJSON('wiz_cache_Amil', fallbackAmils));
+    // Proteksi data default berupa Array []
+    const [amils, setAmils] = useState(() => safeGetJSON('wiz_cache_Amil', typeof fallbackAmils !== 'undefined' ? fallbackAmils : []));
     const [contacts, setContacts] = useState(() => safeGetJSON('wiz_cache_Kontak', []));
     const [programs, setPrograms] = useState(() => safeGetJSON('wiz_cache_Program', []));
     const [donations, setDonations] = useState(() => safeGetJSON('wiz_cache_Donasi', []));
     const [tasks, setTasks] = useState(() => safeGetJSON('wiz_cache_Tugas', []));
-    
     const [pundis, setPundis] = useState(() => safeGetJSON('wiz_cache_Pundi', []));
     const [riwayatPundis, setRiwayatPundis] = useState(() => safeGetJSON('wiz_cache_RiwayatPundi', []));
 
@@ -65,7 +67,10 @@ const App = () => {
     const fetchAllData = async (isManualRefresh = false) => {
         if (isManualRefresh) setIsRefreshing(true);
         try {
-            const res = await fetch(API_URL);
+            const targetUrl = typeof API_URL !== 'undefined' ? API_URL : '';
+            if (!targetUrl) return;
+            
+            const res = await fetch(targetUrl);
             const result = await res.json();
             if (result.status === 'success' && result.data) {
                 const d = result.data;
@@ -135,7 +140,8 @@ const App = () => {
     const syncDataToSheet = async (sheetName, newData) => {
         safeSetJSON('wiz_cache_' + sheetName, newData);
         try {
-            await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'syncData', sheetName, data: newData }) });
+            const targetUrl = typeof API_URL !== 'undefined' ? API_URL : '';
+            await fetch(targetUrl, { method: 'POST', body: JSON.stringify({ action: 'syncData', sheetName, data: newData }) });
         } catch(err) { setIsOfflineMode(true); }
     };
 
@@ -287,10 +293,10 @@ const App = () => {
                     </div>
                 </div>
             )},
-            { key: 'target', label: 'Target', render: r => formatRp(r.target) },
+            { key: 'target', label: 'Target', render: r => typeof formatRp === 'function' ? formatRp(r.target) : r.target },
             { key: 'collected', label: 'Terkumpul', render: r => (
                 <div>
-                    <span className="text-wiz-green dark:text-emerald-400 font-bold">{formatRp(r.collected)}</span>
+                    <span className="text-wiz-green dark:text-emerald-400 font-bold">{typeof formatRp === 'function' ? formatRp(r.collected) : r.collected}</span>
                     {r.target > 0 && (
                         <span className="ml-2 text-xs text-gray-400 font-medium">({Math.min(Math.round((r.collected / r.target) * 100), 100)}%)</span>
                     )}
@@ -323,16 +329,16 @@ const App = () => {
         defaultValues: { amilName: user?.name, date: new Date().toISOString().split('T')[0] },
         onSave: createSaveHandler(setDonations, donations, 'Donasi'), onDelete: createDeleteHandler(setDonations, donations, 'Donasi'),
         columns: [
-            { key: 'date', label: 'Tanggal', render: r => formatDate(r.date) },
+            { key: 'date', label: 'Tanggal', render: r => typeof formatDate === 'function' ? formatDate(r.date) : r.date },
             { key: 'donorName', label: 'Donatur', render: r => <span className="font-semibold">{r.donorName}</span> },
             { key: 'programName', label: 'Program' },
             { key: 'rekening', label: 'Bank' },
-            { key: 'amount', label: 'Nominal', render: r => <span className="font-bold text-wiz-green dark:text-emerald-400 bg-wiz-green/5 dark:bg-wiz-green/20 px-2 py-1 rounded-md">{formatRp(r.amount)}</span> },
+            { key: 'amount', label: 'Nominal', render: r => <span className="font-bold text-wiz-green dark:text-emerald-400 bg-wiz-green/5 dark:bg-wiz-green/20 px-2 py-1 rounded-md">{typeof formatRp === 'function' ? formatRp(r.amount) : r.amount}</span> },
             { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> },
             { key: 'amilName', label: 'PIC' },
             { key: 'receiptUrl', label: 'Bukti', render: r => {
                 if (!r.receiptUrl || String(r.receiptUrl).trim() === '') return <span className="text-gray-300 dark:text-gray-600">-</span>;
-                const directUrl = getDirectImageUrl(r.receiptUrl);
+                const directUrl = typeof getDirectImageUrl === 'function' ? getDirectImageUrl(r.receiptUrl) : r.receiptUrl;
                 return (
                     <div className="relative group w-10 h-10">
                         <img 
@@ -374,7 +380,7 @@ const App = () => {
             { key: 'name', label: 'Uraian Tugas', render: r => <span className="font-semibold text-gray-700 dark:text-gray-200">{r.name}</span> },
             { key: 'assignedTo', label: 'Pelaksana' },
             { key: 'period', label: 'Siklus', render: r => <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-md text-gray-600 dark:text-gray-300">{r.period}</span> },
-            { key: 'deadline', label: 'Batas', render: r => formatDate(r.deadline) },
+            { key: 'deadline', label: 'Batas', render: r => typeof formatDate === 'function' ? formatDate(r.deadline) : r.deadline },
             { key: 'status', label: 'Progress', render: r => <StatusBadge text={r.status} /> }
         ],
         schema: [
@@ -394,7 +400,7 @@ const App = () => {
                 key: 'photoUrl', 
                 label: 'Foto Profil', 
                 render: r => {
-                    const direct = getDirectImageUrl(r.photoUrl);
+                    const direct = typeof getDirectImageUrl === 'function' ? getDirectImageUrl(r.photoUrl) : r.photoUrl;
                     return (
                         <div className="w-11 h-11 rounded-full overflow-hidden bg-wiz-green/10 text-wiz-green dark:text-emerald-400 flex items-center justify-center font-bold text-sm border-2 border-white dark:border-gray-700 shadow-sm">
                             {direct ? (
@@ -447,7 +453,7 @@ const App = () => {
                         src="https://drive.google.com/uc?id=1TcpcZtGKBKAOBAthf6Rea4HHDZ0l9tBU" 
                         alt="Logo WIZ" 
                         className="h-10 object-contain"
-                        onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }}
+                        onError={(e) => { e.target.style.display = 'none'; if(e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }}
                     />
                     <div style={{display: 'none'}} className="text-3xl font-black text-wiz-green dark:text-emerald-400 tracking-tighter">WIZ<span className="text-wiz-orange">BERAU</span></div>
                 </div>
@@ -520,10 +526,10 @@ const App = () => {
                                 <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-wiz-green to-[#2e8870] flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-gray-700 overflow-hidden">
                                     {user.photoUrl ? (
                                         <img 
-                                            src={getDirectImageUrl(user.photoUrl)} 
+                                            src={typeof getDirectImageUrl === 'function' ? getDirectImageUrl(user.photoUrl) : user.photoUrl} 
                                             alt={user.name} 
                                             className="w-full h-full object-cover" 
-                                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} 
+                                            onError={(e) => { e.target.style.display = 'none'; if(e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }} 
                                         />
                                     ) : null}
                                     <span style={{ display: user.photoUrl ? 'none' : 'block' }}>
@@ -630,8 +636,8 @@ const App = () => {
                                                                         <div className="bg-wiz-green dark:bg-emerald-500 h-2 rounded-full transition-all duration-700" style={{ width: `${percentTarget}%` }}></div>
                                                                     </div>
                                                                     <div className="flex justify-between text-[11px] font-semibold text-gray-600 dark:text-gray-300">
-                                                                        <span>Terkumpul: {formatRp(totalAmilCollected)}</span>
-                                                                        <span>Target: {formatRp(totalAmilTarget)}</span>
+                                                                        <span>Terkumpul: {typeof formatRp === 'function' ? formatRp(totalAmilCollected) : totalAmilCollected}</span>
+                                                                        <span>Target: {typeof formatRp === 'function' ? formatRp(totalAmilTarget) : totalAmilTarget}</span>
                                                                     </div>
                                                                 </div>
                                                             ) : (
@@ -643,11 +649,11 @@ const App = () => {
                                                             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 dark:border-gray-700 text-xs">
                                                                 <div>
                                                                     <p className="text-[10px] uppercase font-bold text-gray-400">Tarik Bulan Ini</p>
-                                                                    <p className="font-bold text-gray-800 dark:text-gray-200 text-sm mt-0.5">{formatRp(totalBulanIni)}</p>
+                                                                    <p className="font-bold text-gray-800 dark:text-gray-200 text-sm mt-0.5">{typeof formatRp === 'function' ? formatRp(totalBulanIni) : totalBulanIni}</p>
                                                                 </div>
                                                                 <div className="text-right">
                                                                     <p className="text-[10px] uppercase font-bold text-gray-400">Kumulatif Pundi</p>
-                                                                    <p className="font-bold text-wiz-green dark:text-emerald-400 text-sm mt-0.5">{formatRp(totalKumulatif)}</p>
+                                                                    <p className="font-bold text-wiz-green dark:text-emerald-400 text-sm mt-0.5">{typeof formatRp === 'function' ? formatRp(totalKumulatif) : totalKumulatif}</p>
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -677,11 +683,11 @@ const App = () => {
                                             <div className="p-4 bg-gray-50 dark:bg-gray-700/60 rounded-xl flex justify-between items-center text-sm">
                                                 <div>
                                                     <p className="text-xs text-gray-400 uppercase font-bold">Total Capaian Campaign</p>
-                                                    <p className="text-lg font-black text-wiz-green dark:text-emerald-400">{formatRp(selectedCampaignBreakdown.collected)}</p>
+                                                    <p className="text-lg font-black text-wiz-green dark:text-emerald-400">{typeof formatRp === 'function' ? formatRp(selectedCampaignBreakdown.collected) : selectedCampaignBreakdown.collected}</p>
                                                 </div>
                                                 <div className="text-right">
                                                     <p className="text-xs text-gray-400 uppercase font-bold">Target</p>
-                                                    <p className="text-sm font-bold text-gray-700 dark:text-gray-200">{formatRp(selectedCampaignBreakdown.target)}</p>
+                                                    <p className="text-sm font-bold text-gray-700 dark:text-gray-200">{typeof formatRp === 'function' ? formatRp(selectedCampaignBreakdown.target) : selectedCampaignBreakdown.target}</p>
                                                 </div>
                                             </div>
 
@@ -724,8 +730,8 @@ const App = () => {
                                                                 </div>
                                                             </div>
                                                             <div className="text-right">
-                                                                <p className="font-bold text-sm text-wiz-green dark:text-emerald-400">{formatRp(amil.totalKontribusi)}</p>
-                                                                {isPundi && <span className="text-[10px] text-wiz-orange">Pundi: {formatRp(amil.pundiAmil)}</span>}
+                                                                <p className="font-bold text-sm text-wiz-green dark:text-emerald-400">{typeof formatRp === 'function' ? formatRp(amil.totalKontribusi) : amil.totalKontribusi}</p>
+                                                                {isPundi && <span className="text-[10px] text-wiz-orange">Pundi: {typeof formatRp === 'function' ? formatRp(amil.pundiAmil) : amil.pundiAmil}</span>}
                                                             </div>
                                                         </div>
                                                     ));
@@ -842,7 +848,7 @@ const App = () => {
                                 <p className="text-sm text-gray-400 dark:text-gray-500 font-medium">Memuat berkas dari Drive...</p>
                             </div>
                             <iframe 
-                                src={getDrivePreviewUrl(viewImage.original)} 
+                                src={typeof getDrivePreviewUrl === 'function' ? getDrivePreviewUrl(viewImage.original) : viewImage.original} 
                                 className="w-full h-full border-0 relative z-10 bg-transparent" 
                                 allow="autoplay"
                                 title="Penampil Berkas"
@@ -857,5 +863,7 @@ const App = () => {
 
 // Render App ke DOM
 const rootElement = document.getElementById('root');
-const root = ReactDOM.createRoot(rootElement);
-root.render(<App />);
+if (rootElement) {
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(<App />);
+}
