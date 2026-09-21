@@ -1,9 +1,9 @@
 // Komponen Manajemen Pundi WIZ (Dashboard, Tugas Penarikan, Master Pundi, Riwayat Sedekah, Cetak)
-// Versi Stabil Berdasarkan Kode Asli + Fitur Checkbox & Rentang Cetak Tugas Penarikan
+// Versi Stabil + Target Harian Bulanan Tahunan + Zona Wilayah Bebas Ketik + Checkbox Akumulatif
 
 const { useState, useEffect, useMemo, useRef } = React;
 
-const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contacts, programs = [], user, syncDataToSheet, darkMode, setViewImage, amils = [], setActiveTab }) => {
+const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundis, contacts = [], programs = [], user, syncDataToSheet, darkMode, setViewImage, amils = [], setActiveTab }) => {
     const [activeSubTab, setActiveSubTab] = useState('dashboard');
     const [selectedAmilFilter, setSelectedAmilFilter] = useState(user?.name || 'Semua');
     
@@ -15,30 +15,107 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     const [editingRiwayat, setEditingRiwayat] = useState(null);
     const [isEditRiwayatOpen, setIsEditRiwayatOpen] = useState(false);
 
-    // State Pilihan Data / Checkbox Tugas Penarikan
+    // Modal List Pundi Belum Dijemput
+    const [isBelumDijemputModalOpen, setIsBelumDijemputModalOpen] = useState(false);
+
+    // Modal & Konfigurasi Pengaturan Target Mandiri Pundi (Harian, Bulanan, Tahunan & Periode Mulai - Akhir)
+    const [isTargetModalOpen, setIsTargetModalOpen] = useState(false);
+    const [targetConfig, setTargetConfig] = useState(() => {
+        const curYear = new Date().getFullYear();
+        const defaultCfg = {
+            umumHarian: 830000,
+            umumBulanan: 25000000,
+            umumTahunan: 300000000,
+            pribadiHarian: 330000,
+            pribadiBulanan: 10000000,
+            pribadiTahunan: 120000000,
+            startDate: `${curYear}-01-01`,
+            endDate: `${curYear}-12-31`
+        };
+        try {
+            const saved = localStorage.getItem('wiz_target_pundi_config');
+            if (saved) return { ...defaultCfg, ...JSON.parse(saved) };
+            return defaultCfg;
+        } catch(e) {
+            return defaultCfg;
+        }
+    });
+
+    // Opsi Default Zona Wilayah
+    const ZONA_DEFAULT_OPTIONS = [
+        'SEKITAR TANJUNG',
+        'MALAM',
+        'KOTAK AMAL',
+        'PASAR',
+        'SEGAH',
+        'TANJUNG BATU',
+        'BIDUK-BIDUK'
+    ];
+
+    // Kumpulan Opsi Zona (Default + Semua Zona Baru yang Diketik Manual di Pundis)
+    const allZonaOptions = useMemo(() => {
+        const set = new Set(ZONA_DEFAULT_OPTIONS);
+        (pundis || []).forEach(p => {
+            if (p.zona && String(p.zona).trim()) {
+                set.add(String(p.zona).trim().toUpperCase());
+            }
+        });
+        return Array.from(set);
+    }, [pundis]);
+
+    // State Checkbox Tugas Penarikan
     const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
 
+    // Filter Master Pundi
     const [searchMaster, setSearchMaster] = useState('');
     const [statusMasterFilter, setStatusMasterFilter] = useState('Semua');
     const [creatorMasterFilter, setCreatorMasterFilter] = useState('Semua');
     const [tipeMasterFilter, setTipeMasterFilter] = useState('Semua');
+    const [zonaMasterFilter, setZonaMasterFilter] = useState('Semua');
     const [masterSortOrder, setMasterSortOrder] = useState('asc');
 
+    // Filter Tugas Penarikan
     const [searchTugas, setSearchTugas] = useState('');
     const [statusTugasFilter, setStatusTugasFilter] = useState('Semua');
     const [tipeTugasFilter, setTipeTugasFilter] = useState('Semua');
+    const [zonaTugasFilter, setZonaTugasFilter] = useState('Semua');
     const [urutAwal, setUrutAwal] = useState('');
     const [urutAkhir, setUrutAkhir] = useState('');
 
+    // Filter Riwayat
     const [searchRiwayat, setSearchRiwayat] = useState('');
     const [statusRiwayatFilter, setStatusRiwayatFilter] = useState('Semua');
     const [monthRiwayatFilter, setMonthRiwayatFilter] = useState('Semua');
     const [amilRiwayatFilter, setAmilRiwayatFilter] = useState('Semua');
 
+    // Filter Dashboard
     const [dashMonth, setDashMonth] = useState(new Date().getMonth());
     const [dashYear, setDashYear] = useState(new Date().getFullYear());
     const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
     const yearOptions = Array.from({length: 7}, (_, i) => new Date().getFullYear() - 3 + i);
+
+    const isAdmin = user?.role === 'Admin';
+    const effectiveAmil = isAdmin ? selectedAmilFilter : user?.name;
+
+    const saveTargetConfig = (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const newCfg = {
+            startDate: form.startDate.value || targetConfig.startDate,
+            endDate: form.endDate.value || targetConfig.endDate,
+            umumHarian: Number(form.targetUmumHarian.value.replace(/\D/g, '')) || 0,
+            umumBulanan: Number(form.targetUmumBulanan.value.replace(/\D/g, '')) || 0,
+            umumTahunan: Number(form.targetUmumTahunan.value.replace(/\D/g, '')) || 0,
+            pribadiHarian: Number(form.targetPribadiHarian.value.replace(/\D/g, '')) || 0,
+            pribadiBulanan: Number(form.targetPribadiBulanan.value.replace(/\D/g, '')) || 0,
+            pribadiTahunan: Number(form.targetPribadiTahunan.value.replace(/\D/g, '')) || 0
+        };
+        setTargetConfig(newCfg);
+        try {
+            localStorage.setItem('wiz_target_pundi_config', JSON.stringify(newCfg));
+        } catch(err) {}
+        setIsTargetModalOpen(false);
+    };
 
     const handleOpenEditRiwayat = (row) => {
         setEditingRiwayat(row);
@@ -46,7 +123,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     };
 
     const saveEditRiwayat = (formData) => {
-        const updated = riwayatPundis.map(r => {
+        const updated = (riwayatPundis || []).map(r => {
             if (String(r.id) === String(editingRiwayat.id)) {
                 return {
                     ...r,
@@ -58,50 +135,43 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             return r;
         });
         setRiwayatPundis(updated);
-        syncDataToSheet('RiwayatPundi', updated);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', updated);
         setIsEditRiwayatOpen(false);
         setEditingRiwayat(null);
     };
 
     const deleteRiwayat = (row) => {
-        const updated = riwayatPundis.filter(r => String(r.id) !== String(row.id));
+        const updated = (riwayatPundis || []).filter(r => String(r.id) !== String(row.id));
         setRiwayatPundis(updated);
-        syncDataToSheet('RiwayatPundi', updated);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', updated);
     };
 
-    const isAdmin = user?.role === 'Admin';
-    const effectiveAmil = isAdmin ? selectedAmilFilter : user.name;
-
     const visiblePundis = useMemo(() => {
-        if (isAdmin && effectiveAmil === 'Semua') {
-            return pundis;
-        }
-        return pundis.filter(p => {
-            const creator = p.createdBy || contacts.find(c => c.name === p.donorName)?.createdBy;
+        const safePundis = Array.isArray(pundis) ? pundis : [];
+        if (isAdmin && effectiveAmil === 'Semua') return safePundis;
+        return safePundis.filter(p => {
+            const creator = p.createdBy || (Array.isArray(contacts) && contacts.find(c => c.name === p.donorName)?.createdBy);
             return creator === effectiveAmil;
         });
     }, [pundis, isAdmin, effectiveAmil, contacts]);
 
     const visibleRiwayatPundis = useMemo(() => {
-        if (isAdmin && effectiveAmil === 'Semua') {
-            return riwayatPundis;
-        }
-        return riwayatPundis.filter(r => r.amilName === effectiveAmil);
+        const safeRiwayat = Array.isArray(riwayatPundis) ? riwayatPundis : [];
+        if (isAdmin && effectiveAmil === 'Semua') return safeRiwayat;
+        return safeRiwayat.filter(r => r.amilName === effectiveAmil);
     }, [riwayatPundis, isAdmin, effectiveAmil]);
 
     const allAmilNames = useMemo(() => {
         const names = new Set((amils || []).map(a => a.name));
-        pundis.forEach(p => {
-            const c = p.createdBy || contacts.find(cnt => cnt.name === p.donorName)?.createdBy;
+        (pundis || []).forEach(p => {
+            const c = p.createdBy || (contacts || []).find(cnt => cnt.name === p.donorName)?.createdBy;
             if (c) names.add(c);
         });
-        riwayatPundis.forEach(r => {
+        (riwayatPundis || []).forEach(r => {
             if (r.amilName) names.add(r.amilName);
         });
         return Array.from(names).filter(Boolean);
     }, [amils, pundis, riwayatPundis, contacts]);
-
-    const uniqueAmils = allAmilNames;
 
     const uniqueMonths = useMemo(() => {
         const map = new Map();
@@ -116,58 +186,89 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
     }, [visibleRiwayatPundis]);
 
-    const activePundiCampaign = useMemo(() => {
-        return programs.find(p => p.status === 'Aktif' && ((p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'))));
-    }, [programs]);
-
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
     
+    // STATS & PERHITUNGAN TARGET TERPADU
     const stats = useMemo(() => {
-        const totalAktif = visiblePundis.filter(p => p.status === 'Aktif').length;
-        const totalUmum = visiblePundis.filter(p => p.status === 'Aktif' && (p.tipePundi || 'Pundi Umum') === 'Pundi Umum').length;
-        const totalPribadi = visiblePundis.filter(p => p.status === 'Aktif' && p.tipePundi === 'Pundi Pribadi').length;
+        const activeBoxes = visiblePundis.filter(p => p.status === 'Aktif');
+        const totalAktif = activeBoxes.length;
+        const totalUmum = activeBoxes.filter(p => (p.tipePundi || 'Pundi Umum') === 'Pundi Umum').length;
+        const totalPribadi = activeBoxes.filter(p => p.tipePundi === 'Pundi Pribadi').length;
         
-        const penambahanUmum = visiblePundis.filter(p => {
-            if (!p.createdAt) return false;
-            const d = new Date(p.createdAt);
-            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
-            return matchMonth && d.getFullYear() === dashYear && (p.tipePundi || 'Pundi Umum') === 'Pundi Umum';
-        }).length;
-
-        const penambahanPribadi = visiblePundis.filter(p => {
-            if (!p.createdAt) return false;
-            const d = new Date(p.createdAt);
-            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
-            return matchMonth && d.getFullYear() === dashYear && p.tipePundi === 'Pundi Pribadi';
-        }).length;
-
-        const ditarikBulanIni = visiblePundis.filter(p => {
-            if (!p.updatedAt) return false;
-            const d = new Date(p.updatedAt);
-            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
-            return p.status === 'Ditarik' && matchMonth && d.getFullYear() === dashYear;
-        }).length;
-        
-        const riwayatBulanIni = visibleRiwayatPundis.filter(r => {
+        // Filter riwayat sesuai bulan & tahun yang dipilih di Dashboard
+        const riwayatPeriode = visibleRiwayatPundis.filter(r => {
+            if (!r.date) return false;
             const d = new Date(r.date);
-            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
-            return matchMonth && d.getFullYear() === dashYear;
+            if (isNaN(d.getTime())) return false;
+            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === Number(dashMonth);
+            const matchYear = d.getFullYear() === Number(dashYear);
+            return matchMonth && matchYear;
         });
-        
-        const berhasil = riwayatBulanIni.filter(r => r.status === 'Berhasil').length;
-        const gagal = riwayatBulanIni.filter(r => r.status === 'Gagal').length;
-        const totalDanaBulanIni = riwayatBulanIni.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0);
-        const totalDanaKumulatif = visibleRiwayatPundis.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
-        return { totalAktif, totalUmum, totalPribadi, penambahanUmum, penambahanPribadi, ditarikBulanIni, berhasil, gagal, totalDanaBulanIni, totalDanaKumulatif };
-    }, [visiblePundis, visibleRiwayatPundis, dashMonth, dashYear]);
+        const riwayatBerhasil = riwayatPeriode.filter(r => r.status === 'Berhasil');
+        const totalDanaBulanIni = riwayatBerhasil.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+        let danaUmum = 0;
+        let danaPribadi = 0;
+        riwayatBerhasil.forEach(r => {
+            const matchedPundi = activeBoxes.find(p => String(p.id) === String(r.pundiId) || String(p.noUrut) === String(r.noUrut));
+            const tipe = (matchedPundi && matchedPundi.tipePundi) || 'Pundi Umum';
+            const amt = Number(r.amount || 0);
+            if (tipe === 'Pundi Pribadi') danaPribadi += amt;
+            else danaUmum += amt;
+        });
+
+        const pickedUpBoxIds = new Set();
+        const inProgressBoxIds = new Set();
+
+        riwayatPeriode.forEach(r => {
+            const pid = String(r.pundiId || r.noUrut);
+            if (r.status === 'Berhasil') pickedUpBoxIds.add(pid);
+            else if (r.status === 'Dijemput') inProgressBoxIds.add(pid);
+        });
+
+        const berhasil = riwayatBerhasil.length;
+        const sedangDijemput = activeBoxes.filter(p => inProgressBoxIds.has(String(p.id)) || inProgressBoxIds.has(String(p.noUrut))).length;
+
+        // Pundi yang belum dijemput
+        const pundiBelumDijemputList = activeBoxes.filter(p =>
+            !pickedUpBoxIds.has(String(p.id)) &&
+            !pickedUpBoxIds.has(String(p.noUrut)) &&
+            !inProgressBoxIds.has(String(p.id)) &&
+            !inProgressBoxIds.has(String(p.noUrut))
+        );
+        const belumDijemputCount = pundiBelumDijemputList.length;
+
+        // Target Periode
+        const isAllMonths = dashMonth === 'Semua';
+        const targetUmumPeriode = isAllMonths ? (targetConfig.umumTahunan || (targetConfig.umumBulanan * 12)) : targetConfig.umumBulanan;
+        const targetPribadiPeriode = isAllMonths ? (targetConfig.pribadiTahunan || (targetConfig.pribadiBulanan * 12)) : targetConfig.pribadiBulanan;
+        const totalTargetPeriode = targetUmumPeriode + targetPribadiPeriode;
+
+        const totalTargetHarian = (targetConfig.umumHarian || 0) + (targetConfig.pribadiHarian || 0);
+        const totalTargetTahunan = (targetConfig.umumTahunan || 0) + (targetConfig.pribadiTahunan || 0);
+
+        const percentUmum = targetUmumPeriode > 0 ? Math.min(Math.round((danaUmum / targetUmumPeriode) * 100), 100) : 0;
+        const percentPribadi = targetPribadiPeriode > 0 ? Math.min(Math.round((danaPribadi / targetPribadiPeriode) * 100), 100) : 0;
+        const percentTotal = totalTargetPeriode > 0 ? Math.min(Math.round((totalDanaBulanIni / totalTargetPeriode) * 100), 100) : 0;
+
+        return { 
+            totalAktif, totalUmum, totalPribadi, 
+            totalDanaBulanIni, danaUmum, danaPribadi, 
+            berhasil, sedangDijemput, belumDijemputCount, pundiBelumDijemputList, 
+            targetUmumPeriode, targetPribadiPeriode, totalTargetPeriode,
+            totalTargetHarian, totalTargetTahunan,
+            percentUmum, percentPribadi, percentTotal
+        };
+    }, [visiblePundis, visibleRiwayatPundis, dashMonth, dashYear, targetConfig]);
 
     const activePundisSorted = [...visiblePundis].filter(p => p.status === 'Aktif').sort((a, b) => Number(a.noUrut) - Number(b.noUrut));
 
+    // FILTER MASTER PUNDI
     const filteredMasterPundis = useMemo(() => {
         const filtered = visiblePundis.filter(p => {
-            const creator = p.createdBy || contacts.find(c => c.name === p.donorName)?.createdBy || '';
+            const creator = p.createdBy || (contacts || []).find(c => c.name === p.donorName)?.createdBy || '';
             const term = searchMaster.toLowerCase().trim();
             const matchSearch = !term ||
                 String(p.noUrut || '').toLowerCase().includes(term) ||
@@ -175,11 +276,13 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 String(p.usaha || '').toLowerCase().includes(term) ||
                 String(p.alamat || '').toLowerCase().includes(term) ||
                 String(p.tipePundi || '').toLowerCase().includes(term) ||
+                String(p.zona || '').toLowerCase().includes(term) ||
                 String(p.phone || '').toLowerCase().includes(term);
             const matchStatus = statusMasterFilter === 'Semua' || p.status === statusMasterFilter;
             const matchCreator = creatorMasterFilter === 'Semua' || creator === creatorMasterFilter;
             const matchTipe = tipeMasterFilter === 'Semua' || (p.tipePundi || 'Pundi Umum') === tipeMasterFilter;
-            return matchSearch && matchStatus && matchCreator && matchTipe;
+            const matchZona = zonaMasterFilter === 'Semua' || String(p.zona || '').toUpperCase() === String(zonaMasterFilter).toUpperCase();
+            return matchSearch && matchStatus && matchCreator && matchTipe && matchZona;
         });
 
         return filtered.sort((a, b) => {
@@ -187,8 +290,9 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             const numB = Number(b.noUrut) || 0;
             return masterSortOrder === 'asc' ? numA - numB : numB - numA;
         });
-    }, [visiblePundis, searchMaster, statusMasterFilter, creatorMasterFilter, tipeMasterFilter, masterSortOrder, contacts]);
+    }, [visiblePundis, searchMaster, statusMasterFilter, creatorMasterFilter, tipeMasterFilter, zonaMasterFilter, masterSortOrder, contacts]);
 
+    // FILTER TUGAS PENARIKAN
     const filteredTugasPundis = useMemo(() => {
         return activePundisSorted.filter(p => {
             const currentRecord = visibleRiwayatPundis.find(r => String(r.pundiId) === String(p.id) && new Date(r.date).getMonth() === currentMonth && new Date(r.date).getFullYear() === currentYear);
@@ -199,7 +303,8 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 String(p.noUrut || '').toLowerCase().includes(term) ||
                 String(p.donorName || '').toLowerCase().includes(term) ||
                 String(p.usaha || '').toLowerCase().includes(term) ||
-                String(p.alamat || '').toLowerCase().includes(term);
+                String(p.alamat || '').toLowerCase().includes(term) ||
+                String(p.zona || '').toLowerCase().includes(term);
             
             let matchStatus = false;
             if (statusTugasFilter === 'Semua') matchStatus = true;
@@ -208,16 +313,17 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             else if (statusTugasFilter === 'Sudah Ditarik' && pStatus === 'Berhasil') matchStatus = true;
 
             const matchTipe = tipeTugasFilter === 'Semua' || (p.tipePundi || 'Pundi Umum') === tipeTugasFilter;
+            const matchZona = zonaTugasFilter === 'Semua' || String(p.zona || '').toUpperCase() === String(zonaTugasFilter).toUpperCase();
 
             const pNo = Number(p.noUrut);
             const matchUrutAwal = urutAwal === '' || isNaN(Number(urutAwal)) || pNo >= Number(urutAwal);
             const matchUrutAkhir = urutAkhir === '' || isNaN(Number(urutAkhir)) || pNo <= Number(urutAkhir);
 
-            return matchSearch && matchStatus && matchTipe && matchUrutAwal && matchUrutAkhir;
+            return matchSearch && matchStatus && matchTipe && matchZona && matchUrutAwal && matchUrutAkhir;
         });
-    }, [activePundisSorted, visibleRiwayatPundis, searchTugas, statusTugasFilter, tipeTugasFilter, urutAwal, urutAkhir, currentMonth, currentYear]);
+    }, [activePundisSorted, visibleRiwayatPundis, searchTugas, statusTugasFilter, tipeTugasFilter, zonaTugasFilter, urutAwal, urutAkhir, currentMonth, currentYear]);
 
-    // Fungsi Pilihan Centang / Checkbox
+    // CHECKBOX AKUMULATIF (PILIHAN DATA TIDAK HILANG SAAT CARI DATA LAIN)
     const toggleSelectTask = (id) => {
         const newSet = new Set(selectedTaskIds);
         if (newSet.has(id)) newSet.delete(id);
@@ -226,13 +332,20 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     };
 
     const toggleSelectAllFiltered = () => {
-        if (selectedTaskIds.size === filteredTugasPundis.length && filteredTugasPundis.length > 0) {
-            setSelectedTaskIds(new Set());
+        const newSet = new Set(selectedTaskIds);
+        const isAllFilteredSelected = filteredTugasPundis.length > 0 && filteredTugasPundis.every(p => newSet.has(p.id));
+
+        if (isAllFilteredSelected) {
+            // Hilangkan centang HANYA untuk yang sedang tampil di pencarian
+            filteredTugasPundis.forEach(p => newSet.delete(p.id));
         } else {
-            setSelectedTaskIds(new Set(filteredTugasPundis.map(p => p.id)));
+            // Tambahkan semua data hasil filter pencarian ini ke dalam centangan
+            filteredTugasPundis.forEach(p => newSet.add(p.id));
         }
+        setSelectedTaskIds(newSet);
     };
 
+    // FILTER RIWAYAT
     const filteredRiwayatPundis = useMemo(() => {
         return visibleRiwayatPundis.filter(r => {
             const term = searchRiwayat.toLowerCase().trim();
@@ -257,7 +370,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     }, [visibleRiwayatPundis, searchRiwayat, statusRiwayatFilter, monthRiwayatFilter, amilRiwayatFilter]);
     
     const nextNoUrut = useMemo(() => {
-        return pundis.reduce((max, p) => Math.max(max, Number(p.noUrut) || 0), 0) + 1;
+        return (pundis || []).reduce((max, p) => Math.max(max, Number(p.noUrut) || 0), 0) + 1;
     }, [pundis]);
 
     const handleQuickScan = (val) => {
@@ -267,9 +380,9 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         let foundPundi = null;
         if (cleanVal.includes('WIZ-PUNDI-')) {
             const extractedId = cleanVal.split('WIZ-PUNDI-')[1].trim();
-            foundPundi = pundis.find(p => String(p.id) === String(extractedId));
+            foundPundi = (pundis || []).find(p => String(p.id) === String(extractedId));
         } else if (!isNaN(cleanVal) && cleanVal.length > 0) {
-            foundPundi = pundis.find(p => String(p.noUrut) === cleanVal);
+            foundPundi = (pundis || []).find(p => String(p.noUrut) === cleanVal);
         }
 
         if (foundPundi) {
@@ -287,7 +400,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
     const markAsDijemput = (pundisToUpdate) => {
         const todayStr = new Date().toISOString().split('T')[0];
-        let newRiwayat = [...riwayatPundis];
+        let newRiwayat = [...(riwayatPundis || [])];
         let isChanged = false;
 
         pundisToUpdate.forEach(p => {
@@ -299,7 +412,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 }
             } else {
                 newRiwayat.push({
-                    id: Date.now() + Math.floor(Math.random() * 10000),
+                    id: Date.now() + Math.floor(Math.random() * 10000) + Number(p.noUrut || 0),
                     date: todayStr, pundiId: p.id, noUrut: p.noUrut, donorName: p.donorName, usaha: p.usaha,
                     amount: 0, status: 'Dijemput', amilName: user?.name || 'Amil', notes: 'Otomatis dicetak', receiptUrl: ''
                 });
@@ -309,18 +422,20 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
         if (isChanged) {
             setRiwayatPundis(newRiwayat);
-            syncDataToSheet('RiwayatPundi', newRiwayat);
+            if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', newRiwayat);
         }
     };
 
     const handlePrintChecklist = () => {
-        // Ambil data yang dicentang, jika tidak ada dicentang cetak seluruh hasil filter
-        const dataToPrint = selectedTaskIds.size > 0 
-            ? filteredTugasPundis.filter(p => selectedTaskIds.has(p.id)) 
-            : filteredTugasPundis;
+        let dataToPrint = [];
+        if (selectedTaskIds.size > 0) {
+            dataToPrint = activePundisSorted.filter(p => selectedTaskIds.has(p.id));
+        } else {
+            dataToPrint = filteredTugasPundis;
+        }
+
         if (dataToPrint.length === 0) return;
 
-        // Otomatis tandai sebagai dalam proses penjemputan
         markAsDijemput(dataToPrint);
 
         const printWindow = window.open('', '_blank');
@@ -332,7 +447,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         const cellPadding = totalItem > 25 ? '2.5px 4px' : totalItem > 15 ? '3.5px 5px' : '5px 6px';
 
         const rangeKeterangan = selectedTaskIds.size > 0 
-            ? `(${selectedTaskIds.size} Pundi Dipilih)` 
+            ? `(${selectedTaskIds.size} Pilihan Ceklis)` 
             : (urutAwal || urutAkhir ? `(Urut ${urutAwal || '1'} - ${urutAkhir || 'Akhir'})` : '');
 
         let html = `
@@ -356,6 +471,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 th { background-color: #27745F; color: #ffffff; font-weight: 800; text-transform: uppercase; font-size: 8.5px; letter-spacing: 0.2px; }
                 tr { page-break-inside: avoid; }
                 .text-center { text-align: center; }
+                .run-no { font-weight: bold; color: #475569; width: 5%; }
                 .no-col { font-weight: 900; color: #166534; font-size: 10px; background: #f0fdf4; }
                 .cell-truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                 .alamat-text { font-size: 8px; color: #475569; line-height: 1.1; }
@@ -386,21 +502,21 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             <table>
                 <thead>
                     <tr>
-                        <th class="text-center" style="width: 5%;">No</th>
+                        <th class="text-center run-no">No</th>
                         <th class="text-center" style="width: 10%;">Reg</th>
                         <th style="width: 22%;">Nama Usaha / Titik</th>
                         <th style="width: 20%;">Donatur & Kontak</th>
-                        <th style="width: 24%;">Alamat Titik</th>
-                        <th style="width: 12%;">Nominal (Rp)</th>
+                        <th style="width: 23%;">Alamat Titik</th>
+                        <th style="width: 13%;">Nominal (Rp)</th>
                         <th class="text-center" style="width: 7%;">Cek</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${dataToPrint.map((p, idx) => `
                         <tr>
-                            <td class="text-center" style="font-weight: bold; color: #64748b;">${idx + 1}</td>
+                            <td class="text-center run-no">${idx + 1}</td>
                             <td class="text-center no-col">#${p.noUrut || '-'}</td>
-                            <td><b style="color: #0f172a;">${p.usaha || '-'}</b></td>
+                            <td><b style="color: #0f172a;">${p.usaha || '-'}</b> ${p.zona ? `<span style="font-size:7px; background:#e0f2fe; color:#0369a1; padding:1px 3px; border-radius:3px;">${p.zona}</span>` : ''}</td>
                             <td>
                                 <div class="cell-truncate"><b>${p.donorName || '-'}</b></div>
                                 <div style="font-size: 7.5px; color: #64748b;">${p.phone || '-'}</div>
@@ -415,7 +531,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
             <div class="footer-wrap">
                 <div class="summary-box">
-                    <b>Catatan Sistem:</b> Pundi yang dicetak ini otomatis berubah statusnya menjadi <b>"Dalam Penjemputan"</b> di aplikasi.<br/>
+                    <b>Catatan Sistem:</b> Data yang dicetak ini telah <b>otomatis berubah statusnya menjadi "Dalam Penjemputan"</b> di aplikasi.<br/>
                     Setelah penjemputan selesai, buka aplikasi menu Tugas dan klik <b>"Hitung Uang"</b> untuk memasukkan nominal.
                 </div>
                 <div class="ttd-block">
@@ -434,12 +550,15 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     };
 
     const handlePrintNotaA4 = () => {
-        const dataToPrint = selectedTaskIds.size > 0 
-            ? filteredTugasPundis.filter(p => selectedTaskIds.has(p.id)) 
-            : filteredTugasPundis;
+        let dataToPrint = [];
+        if (selectedTaskIds.size > 0) {
+            dataToPrint = activePundisSorted.filter(p => selectedTaskIds.has(p.id));
+        } else {
+            dataToPrint = filteredTugasPundis;
+        }
+
         if (dataToPrint.length === 0) return;
 
-        // Otomatis tandai sebagai dalam proses penjemputan
         markAsDijemput(dataToPrint);
 
         const printWindow = window.open('', '_blank');
@@ -454,7 +573,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         let pagesHtml = chunks.map((group, pageIdx) => `
             <div class="a4-page">
                 ${group.map((p, itemIdx) => {
-                    const runningNum = (pageIdx * 10) + itemIdx + 1;
+                    const runningNumber = (pageIdx * 10) + itemIdx + 1;
                     return `
                     <div class="nota-card">
                         <div class="nota-header">
@@ -462,7 +581,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 <span class="brand-wiz">WIZ</span><span class="brand-berau">BERAU</span>
                                 <span class="nota-title">BUKTI INFAQ / SEDEKAH PUNDI</span>
                             </div>
-                            <div class="badge-urut">Cetak #${runningNum} | Pundi #${p.noUrut}</div>
+                            <div class="badge-urut">Cetak #${runningNumber} | Reg #${p.noUrut}</div>
                         </div>
                         
                         <div class="nota-body">
@@ -501,7 +620,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         let html = `
         <html>
         <head>
-            <title>Cetak 10 Nota Pundi A4 - WIZ Berau</title>
+            <title>Cetak Nota Pundi A4 - WIZ Berau</title>
             <style>
                 @page { size: A4 portrait; margin: 6mm 7mm; }
                 * { box-sizing: border-box; }
@@ -545,29 +664,30 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
     const savePundi = (formData, isEdit) => {
         const now = new Date().toISOString();
-        const existing = isEdit ? pundis.find(p => String(p.id) === String(formData.id)) : null;
+        const existing = isEdit ? (pundis || []).find(p => String(p.id) === String(formData.id)) : null;
         let newData = { 
             ...(existing || {}),
             ...formData, 
             tipePundi: formData.tipePundi || (existing && existing.tipePundi) || 'Pundi Umum',
+            zona: (formData.zona || (existing && existing.zona) || 'SEKITAR TANJUNG').toString().trim().toUpperCase(),
             updatedAt: now 
         };
         if (!isEdit) {
             newData.id = Date.now();
             newData.createdAt = now;
-            newData.createdBy = user.name;
+            newData.createdBy = user?.name || 'Amil';
         }
         const updatedList = isEdit 
-            ? pundis.map(p => String(p.id) === String(newData.id) ? newData : p) 
-            : [...pundis, newData];
+            ? (pundis || []).map(p => String(p.id) === String(newData.id) ? newData : p) 
+            : [...(pundis || []), newData];
         setPundis(updatedList);
-        syncDataToSheet('Pundi', updatedList);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('Pundi', updatedList);
     };
 
     const deletePundi = (row) => {
-        const updatedList = pundis.filter(p => String(p.id) !== String(row.id));
+        const updatedList = (pundis || []).filter(p => String(p.id) !== String(row.id));
         setPundis(updatedList);
-        syncDataToSheet('Pundi', updatedList);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('Pundi', updatedList);
     };
 
     const submitInputHasil = (formData) => {
@@ -579,21 +699,22 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             noUrut: selectedPundi.noUrut,
             donorName: selectedPundi.donorName,
             usaha: selectedPundi.usaha,
-            amount: formData.amount || 0,
+            amount: Number(formData.amount || 0),
             status: formData.status,
-            amilName: user.name,
+            amilName: user?.name || 'Amil',
             notes: formData.notes || '',
             receiptUrl: formData.receiptUrl || ''
         };
-        const updatedRiwayat = [...riwayatPundis, transaction];
+        const updatedRiwayat = [...(riwayatPundis || []), transaction];
         setRiwayatPundis(updatedRiwayat);
-        syncDataToSheet('RiwayatPundi', updatedRiwayat);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', updatedRiwayat);
         setIsInputModalOpen(false);
     };
 
     const MasterPundiSchema = [
         { name: 'noUrut', label: 'Nomor Urut Penarikan (Angka)', type: 'number', required: true },
         { name: 'tipePundi', label: 'Jenis / Tipe Pundi', type: 'select', options: ['Pundi Umum', 'Pundi Pribadi'], required: true },
+        { name: 'zona', label: 'Zona Wilayah Pundi (Pilih / Ketik Manual)', type: 'datalist', options: allZonaOptions, required: true },
         { name: 'donorName', label: 'Nama Donatur (Ketik Manual)', type: 'text', required: true },
         { name: 'phone', label: 'Nomor Telp / WhatsApp', type: 'text', required: true },
         { name: 'usaha', label: 'Nama Usaha / Lokasi Titik', required: true },
@@ -611,6 +732,11 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                     <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${r.tipePundi === 'Pundi Pribadi' ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-300 border-purple-200 dark:border-purple-800' : 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-800'}`}>
                         {r.tipePundi || 'Pundi Umum'}
                     </span>
+                    {r.zona && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                            <i className="fa-solid fa-location-dot mr-0.5"></i> {r.zona}
+                        </span>
+                    )}
                 </div>
                 <p className="text-xs text-wiz-orange dark:text-amber-400 font-medium mt-0.5"><i className="fa-solid fa-store mr-1"></i> {r.usaha}</p>
                 {r.phone && <p className="text-[11px] text-gray-500 mt-0.5"><i className="fa-brands fa-whatsapp text-green-500 mr-1"></i> {r.phone}</p>}
@@ -669,6 +795,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
     return (
         <div className="space-y-6 slide-up relative">
+            {/* Header Manajemen Pundi */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100"><i className="fa-solid fa-box-open text-wiz-orange mr-2"></i> Manajemen Pundi WIZ</h2>
@@ -676,6 +803,15 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 </div>
 
                 <div className="flex items-center gap-3">
+                    <Button 
+                        onClick={() => setIsTargetModalOpen(true)}
+                        variant="secondary"
+                        className="shadow-sm font-bold text-xs py-2.5 px-3.5 border-wiz-green/30 text-wiz-green hover:bg-wiz-green/10"
+                        icon="fa-solid fa-bullseye"
+                    >
+                        🎯 Atur / Target Pundi
+                    </Button>
+
                     <Button 
                         onClick={() => setActiveTab('scanner')} 
                         variant="primary" 
@@ -727,6 +863,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 </div>
             </div>
 
+            {/* Menu Navigasi Sub Tab */}
             <div className="flex overflow-x-auto gap-2 bg-white dark:bg-gray-800 p-1.5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm w-full hide-scrollbar">
                 {[
                     { id: 'dashboard', label: 'Dashboard Analitik', icon: 'fa-chart-pie' },
@@ -741,9 +878,12 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 ))}
             </div>
 
-            {/* DASHBOARD TAB */}
+            {/* =========================================================
+                TAB 1: DASHBOARD ANALITIK PUNDI
+               ========================================================= */}
             {activeSubTab === 'dashboard' && (
                 <div className="space-y-6 animate-in">
+                    {/* Filter Periode Bulan & Tahun */}
                     <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <div>
                             <h3 className="font-bold text-gray-800 dark:text-gray-100 text-sm"><i className="fa-solid fa-filter text-wiz-green mr-1.5"></i> Filter Periode Analitik</h3>
@@ -767,233 +907,204 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                             </select>
                         </div>
                     </div>
-                    
-                    {activePundiCampaign && (
-                        <div className="p-6 bg-gradient-to-r from-wiz-orange_dark via-wiz-orange to-amber-500 rounded-3xl text-white shadow-xl shadow-wiz-orange/20 relative overflow-hidden">
-                            <div className="absolute -right-6 -bottom-6 text-9xl text-white/10 pointer-events-none">
-                                <i className="fa-solid fa-bullseye"></i>
+
+                    {/* Banner Target Terpadu Pundi Mandiri */}
+                    <div className="p-6 bg-gradient-to-r from-wiz-green_dark via-wiz-green to-teal-700 rounded-3xl text-white shadow-xl relative overflow-hidden">
+                        <div className="absolute -right-6 -bottom-6 text-9xl text-white/10 pointer-events-none">
+                            <i className="fa-solid fa-bullseye"></i>
+                        </div>
+                        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black uppercase tracking-wider mb-2">
+                                    <i className="fa-solid fa-bullseye"></i> Target: {dashMonth === 'Semua' ? `Semua Bulan ${dashYear}` : `${monthNames[dashMonth]} ${dashYear}`}
+                                </div>
+                                <h3 className="text-3xl font-black">{typeof formatRp === 'function' ? formatRp(stats.totalDanaBulanIni) : stats.totalDanaBulanIni}</h3>
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-white/90 text-xs mt-1.5">
+                                    <span>Target Periode: <b>{typeof formatRp === 'function' ? formatRp(stats.totalTargetPeriode) : stats.totalTargetPeriode}</b></span>
+                                    <span>•</span>
+                                    <span>Harian: <b>{typeof formatRp === 'function' ? formatRp(stats.totalTargetHarian) : stats.totalTargetHarian}</b></span>
+                                    <span>•</span>
+                                    <span>Tahunan: <b>{typeof formatRp === 'function' ? formatRp(stats.totalTargetTahunan) : stats.totalTargetTahunan}</b></span>
+                                </div>
+                                <p className="text-[11px] text-white/75 mt-1 flex items-center gap-1.5">
+                                    <i className="fa-regular fa-calendar-check text-[10px]"></i>
+                                    Masa Target: <b>{typeof formatDate === 'function' ? formatDate(targetConfig.startDate) : targetConfig.startDate}</b> s/d <b>{typeof formatDate === 'function' ? formatDate(targetConfig.endDate) : targetConfig.endDate}</b>
+                                </p>
                             </div>
-                            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+
+                            <div className="bg-white/15 backdrop-blur-md px-5 py-3 rounded-2xl border border-white/20 flex items-center gap-6">
                                 <div>
-                                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black uppercase tracking-wider mb-2">
-                                        <i className="fa-solid fa-arrows-rotate animate-spin"></i> Target Campaign Pundi Terhubung
-                                    </div>
-                                    <h3 className="text-2xl font-black">{activePundiCampaign.name}</h3>
-                                    <p className="text-white/80 text-xs mt-1">Batas Waktu: {typeof formatDate === 'function' ? formatDate(activePundiCampaign.deadline) : activePundiCampaign.deadline}</p>
+                                    <p className="text-[10px] uppercase font-bold text-white/75">Capaian</p>
+                                    <p className="text-2xl font-black text-amber-300">{stats.percentTotal}%</p>
                                 </div>
-                                <div className="bg-white/15 backdrop-blur-md px-5 py-3 rounded-2xl border border-white/20 flex items-center gap-6">
-                                    <div>
-                                        <p className="text-[10px] uppercase font-bold text-white/75">Target Dana</p>
-                                        <p className="text-lg font-black">{typeof formatRp === 'function' ? formatRp(activePundiCampaign.target) : activePundiCampaign.target}</p>
-                                    </div>
-                                    <div className="h-8 w-px bg-white/20"></div>
-                                    <div>
-                                        <p className="text-[10px] uppercase font-bold text-white/75">Terkumpul</p>
-                                        <p className="text-lg font-black text-white">{typeof formatRp === 'function' ? formatRp(stats.totalDanaKumulatif) : stats.totalDanaKumulatif}</p>
-                                    </div>
-                                    <div className="bg-white text-wiz-orange_dark font-black px-3 py-1.5 rounded-xl text-sm shadow">
-                                        {activePundiCampaign.target > 0 ? Math.min(Math.round((stats.totalDanaKumulatif / activePundiCampaign.target) * 100), 100) : 0}%
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="w-full bg-black/20 rounded-full h-2 mt-5 relative z-10 overflow-hidden">
-                                <div 
-                                    className="bg-white h-2 rounded-full transition-all duration-1000 shadow-md" 
-                                    style={{ width: `${activePundiCampaign.target > 0 ? Math.min(Math.round((stats.totalDanaKumulatif / activePundiCampaign.target) * 100), 100) : 0}%` }}
-                                ></div>
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                        <div className="bg-gradient-to-br from-wiz-green to-wiz-green_dark p-6 rounded-2xl text-white shadow-lg relative overflow-hidden">
-                            <i className="fa-solid fa-box-open absolute -right-4 -bottom-4 text-7xl opacity-10"></i>
-                            <p className="text-sm font-semibold opacity-80 uppercase tracking-wide mb-1">Total Pundi Aktif (Akumulasi)</p>
-                            <h3 className="text-4xl font-black">{stats.totalAktif} <span className="text-base font-normal opacity-75">Kotak</span></h3>
-                            <div className="flex items-center gap-3 mt-3 pt-3 border-t border-white/20 text-xs">
-                                <span className="bg-white/20 px-2 py-0.5 rounded-md font-semibold"><i className="fa-solid fa-store mr-1"></i> {stats.totalUmum} Umum</span>
-                                <span className="bg-white/20 px-2 py-0.5 rounded-md font-semibold"><i className="fa-solid fa-house-user mr-1"></i> {stats.totalPribadi} Pribadi</span>
-                            </div>
-                        </div>
-
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center">
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-                                Aktivitas Kotak <span className="text-wiz-green capitalize font-black ml-1">({dashMonth === 'Semua' ? `Sepanjang ${dashYear}` : `${monthNames[dashMonth]} ${dashYear}`})</span>
-                            </p>
-                            <div className="space-y-3.5">
-                                <div className="flex justify-between items-center text-sm font-semibold">
-                                    <span className="text-blue-500 flex items-center gap-2"><i className="fa-solid fa-circle-plus"></i> Tambah (Umum)</span>
-                                    <span className="text-gray-800 dark:text-gray-200 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-md border border-blue-100 dark:border-blue-800/50">{stats.penambahanUmum} Kotak</span>
-                                </div>
-                                <div className="flex justify-between items-center text-sm font-semibold">
-                                    <span className="text-purple-500 flex items-center gap-2"><i className="fa-solid fa-circle-plus"></i> Tambah (Pribadi)</span>
-                                    <span className="text-gray-800 dark:text-gray-200 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-md border border-purple-100 dark:border-purple-800/50">{stats.penambahanPribadi} Kotak</span>
-                                </div>
-                                <div className="flex justify-between items-center text-sm font-semibold pt-2 border-t border-gray-100 dark:border-gray-700">
-                                    <span className="text-red-500 flex items-center gap-2"><i className="fa-solid fa-arrow-right-from-bracket"></i> Pundi Ditarik</span>
-                                    <span className="text-gray-800 dark:text-gray-200 bg-red-50 dark:bg-red-900/30 px-2 py-0.5 rounded-md border border-red-100 dark:border-red-800/50">{stats.ditarikBulanIni} Kotak</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center">
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                                Hasil Penarikan <span className="text-wiz-orange capitalize font-black ml-1">({dashMonth === 'Semua' ? `Sepanjang ${dashYear}` : `${monthNames[dashMonth]} ${dashYear}`})</span>
-                            </p>
-                            <div className="flex justify-between items-center mb-2">
-                                <span className="text-sm font-semibold text-gray-600 dark:text-gray-300">Berhasil: <span className="text-wiz-green font-bold bg-wiz-green/10 px-1.5 py-0.5 rounded">{stats.berhasil}</span></span>
-                                <span className="text-sm font-semibold text-gray-600 dark:text-gray-300">Gagal: <span className="text-red-500 font-bold bg-red-50 px-1.5 py-0.5 rounded">{stats.gagal}</span></span>
-                            </div>
-                            <p className="text-[10px] font-bold text-gray-400 uppercase mt-2">Nominal Terkumpul</p>
-                            <p className="text-2xl font-black text-wiz-orange">{typeof formatRp === 'function' ? formatRp(stats.totalDanaBulanIni) : stats.totalDanaBulanIni}</p>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* MASTER PUNDI TAB */}
-            {activeSubTab === 'master' && (
-                <div className="space-y-4 animate-in">
-                    <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
-                        <div className="flex flex-col md:flex-row gap-3">
-                            <div className="flex-1 relative">
-                                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
-                                    <i className="fa-solid fa-magnifying-glass"></i>
-                                </div>
-                                <input
-                                    type="text"
-                                    value={searchMaster}
-                                    onChange={(e) => setSearchMaster(e.target.value)}
-                                    placeholder="Cari No. Urut, nama donatur, tipe pundi, usaha, alamat, no. HP..."
-                                    className="w-full pl-10 pr-9 py-2 bg-gray-50 dark:bg-gray-700/70 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:ring-2 focus:ring-wiz-green focus:border-wiz-green outline-none text-gray-800 dark:text-gray-100 transition-all"
-                                />
-                                {searchMaster && (
-                                    <button onClick={() => setSearchMaster('')} className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                                        <i className="fa-solid fa-circle-xmark text-sm"></i>
-                                    </button>
-                                )}
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-2.5">
                                 <button 
-                                    onClick={() => setMasterSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-                                    className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700/70 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm"
-                                    title="Ubah Urutan Nomor"
+                                    onClick={() => setIsTargetModalOpen(true)}
+                                    className="px-3 py-1.5 bg-white text-wiz-green hover:bg-gray-100 rounded-xl text-xs font-bold shadow-md transition-colors"
                                 >
-                                    <i className={`fa-solid ${masterSortOrder === 'asc' ? 'fa-arrow-down-1-9' : 'fa-arrow-up-9-1'} text-xs text-wiz-green dark:text-emerald-400`}></i>
-                                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Urutkan</span>
+                                    Ubah Target
                                 </button>
-
-                                <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700/70 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
-                                    <i className="fa-solid fa-tags text-xs text-gray-400"></i>
-                                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Tipe:</span>
-                                    <select
-                                        value={tipeMasterFilter}
-                                        onChange={(e) => setTipeMasterFilter(e.target.value)}
-                                        className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer"
-                                    >
-                                        <option value="Semua" className="dark:bg-gray-800">Semua Tipe</option>
-                                        <option value="Pundi Umum" className="dark:bg-gray-800">Pundi Umum</option>
-                                        <option value="Pundi Pribadi" className="dark:bg-gray-800">Pundi Pribadi</option>
-                                    </select>
-                                </div>
-
-                                <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700/70 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
-                                    <i className="fa-solid fa-filter text-xs text-gray-400"></i>
-                                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Status:</span>
-                                    <select
-                                        value={statusMasterFilter}
-                                        onChange={(e) => setStatusMasterFilter(e.target.value)}
-                                        className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer"
-                                    >
-                                        <option value="Semua" className="dark:bg-gray-800">Semua Status</option>
-                                        <option value="Aktif" className="dark:bg-gray-800">Aktif</option>
-                                        <option value="Ditarik" className="dark:bg-gray-800">Ditarik</option>
-                                    </select>
-                                </div>
-
-                                {isAdmin && uniqueAmils.length > 0 && (
-                                    <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700/70 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
-                                        <i className="fa-solid fa-user text-xs text-gray-400"></i>
-                                        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Amil:</span>
-                                        <select
-                                            value={creatorMasterFilter}
-                                            onChange={(e) => setCreatorMasterFilter(e.target.value)}
-                                            className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer max-w-[130px] truncate"
-                                        >
-                                            <option value="Semua" className="dark:bg-gray-800">Semua Amil</option>
-                                            {uniqueAmils.map((amil, idx) => (
-                                                <option key={idx} value={amil} className="dark:bg-gray-800">{amil}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
-
-                                {(searchMaster || statusMasterFilter !== 'Semua' || creatorMasterFilter !== 'Semua' || tipeMasterFilter !== 'Semua' || masterSortOrder !== 'asc') && (
-                                    <button
-                                        onClick={() => { setSearchMaster(''); setStatusMasterFilter('Semua'); setCreatorMasterFilter('Semua'); setTipeMasterFilter('Semua'); setMasterSortOrder('asc'); }}
-                                        className="px-2.5 py-1.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg font-semibold transition-colors flex items-center gap-1"
-                                        title="Reset Semua Filter"
-                                    >
-                                        <i className="fa-solid fa-rotate-left"></i> Reset
-                                    </button>
-                                )}
                             </div>
                         </div>
-
-                        <div className="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500 pt-1 border-t border-gray-50 dark:border-gray-700/50">
-                            <span>Menampilkan <b>{filteredMasterPundis.length}</b> dari <b>{visiblePundis.length}</b> kotak pundi terdaftar</span>
-                            {filteredMasterPundis.length === 0 && <span className="text-amber-500 font-medium">Tidak ada data yang cocok dengan kriteria filter</span>}
+                        <div className="w-full bg-black/20 rounded-full h-2 mt-5 relative z-10 overflow-hidden">
+                            <div className="bg-white h-2 rounded-full transition-all duration-1000 shadow-md" style={{ width: `${stats.percentTotal}%` }}></div>
                         </div>
                     </div>
 
-                    <ModuleView 
-                        title="Data Kotak Pundi" 
-                        data={filteredMasterPundis} 
-                        columns={MasterPundiColumns} 
-                        schema={MasterPundiSchema} 
-                        defaultValues={{ noUrut: nextNoUrut, status: 'Aktif', tipePundi: 'Pundi Umum' }}
-                        onSave={savePundi} 
-                        onDelete={isAdmin ? deletePundi : null} 
-                        canDelete={isAdmin}
-                    />
+                    {/* Grid Kartu Nominal Terkumpul & Target (Umum vs Pribadi & Belum Dijemput) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                        {/* Pundi Umum */}
+                        <div className="bg-white dark:bg-gray-800 p-5 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-0.5 rounded-md">
+                                        <i className="fa-solid fa-store mr-1"></i> Pundi Umum
+                                    </span>
+                                    <span className="text-xs font-black text-blue-600">{stats.percentUmum}%</span>
+                                </div>
+                                <p className="text-xs text-gray-400">Terkumpul Periode Ini:</p>
+                                <h4 className="text-2xl font-black text-gray-800 dark:text-gray-100 mt-0.5">
+                                    {typeof formatRp === 'function' ? formatRp(stats.danaUmum) : stats.danaUmum}
+                                </h4>
+                            </div>
+                            <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/60">
+                                <div className="flex justify-between text-[11px] text-gray-500 mb-1">
+                                    <span>Target: {typeof formatRp === 'function' ? formatRp(stats.targetUmumPeriode) : stats.targetUmumPeriode}</span>
+                                    <span>{stats.totalUmum} Kotak</span>
+                                </div>
+                                <div className="flex justify-between text-[10px] text-gray-400 mb-1.5">
+                                    <span>Harian: {typeof formatRp === 'function' ? formatRp(targetConfig.umumHarian) : targetConfig.umumHarian}</span>
+                                    <span>Tahunan: {typeof formatRp === 'function' ? formatRp(targetConfig.umumTahunan) : targetConfig.umumTahunan}</span>
+                                </div>
+                                <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                                    <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${stats.percentUmum}%` }}></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Pundi Pribadi */}
+                        <div className="bg-white dark:bg-gray-800 p-5 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2.5 py-0.5 rounded-md">
+                                        <i className="fa-solid fa-house-user mr-1"></i> Pundi Pribadi
+                                    </span>
+                                    <span className="text-xs font-black text-purple-600">{stats.percentPribadi}%</span>
+                                </div>
+                                <p className="text-xs text-gray-400">Terkumpul Periode Ini:</p>
+                                <h4 className="text-2xl font-black text-gray-800 dark:text-gray-100 mt-0.5">
+                                    {typeof formatRp === 'function' ? formatRp(stats.danaPribadi) : stats.danaPribadi}
+                                </h4>
+                            </div>
+                            <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/60">
+                                <div className="flex justify-between text-[11px] text-gray-500 mb-1">
+                                    <span>Target: {typeof formatRp === 'function' ? formatRp(stats.targetPribadiPeriode) : stats.targetPribadiPeriode}</span>
+                                    <span>{stats.totalPribadi} Kotak</span>
+                                </div>
+                                <div className="flex justify-between text-[10px] text-gray-400 mb-1.5">
+                                    <span>Harian: {typeof formatRp === 'function' ? formatRp(targetConfig.pribadiHarian) : targetConfig.pribadiHarian}</span>
+                                    <span>Tahunan: {typeof formatRp === 'function' ? formatRp(targetConfig.pribadiTahunan) : targetConfig.pribadiTahunan}</span>
+                                </div>
+                                <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                                    <div className="bg-purple-500 h-1.5 rounded-full" style={{ width: `${stats.percentPribadi}%` }}></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Pundi Belum Dijemput (Klik untuk lihat daftar) */}
+                        <div 
+                            onClick={() => setIsBelumDijemputModalOpen(true)}
+                            className="bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/20 dark:to-gray-800 p-5 rounded-3xl border border-amber-200 dark:border-amber-800 shadow-sm flex flex-col justify-between cursor-pointer hover:shadow-md hover:border-amber-400 transition-all group"
+                        >
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/40 px-2.5 py-0.5 rounded-md">
+                                        <i className="fa-solid fa-clock mr-1"></i> Belum Dijemput
+                                    </span>
+                                    <span className="text-xs text-amber-500 font-bold group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
+                                        Lihat <i className="fa-solid fa-arrow-right text-[10px]"></i>
+                                    </span>
+                                </div>
+                                <p className="text-xs text-gray-400">Antrean Kotak:</p>
+                                <h4 className="text-3xl font-black text-amber-600 dark:text-amber-400 mt-0.5">
+                                    {stats.belumDijemputCount} <span className="text-xs font-bold text-gray-400">Kotak</span>
+                                </h4>
+                            </div>
+                            <div className="mt-4 pt-3 border-t border-amber-100 dark:border-amber-900/50 flex items-center justify-between text-xs text-amber-700 dark:text-amber-400 font-semibold">
+                                <span>Perlu dikunjungi</span>
+                                <i className="fa-solid fa-hand-holding-box text-sm"></i>
+                            </div>
+                        </div>
+
+                        {/* Status Lapangan */}
+                        <div className="bg-white dark:bg-gray-800 p-5 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-wiz-green dark:text-emerald-400 bg-wiz-green/10 px-2.5 py-0.5 rounded-md">
+                                        <i className="fa-solid fa-truck mr-1"></i> Penjemputan
+                                    </span>
+                                    <i className="fa-solid fa-clipboard-check text-gray-300 text-lg"></i>
+                                </div>
+                                <p className="text-xs text-gray-400">Progress Penarikan:</p>
+                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                    <div className="p-2 bg-yellow-50 dark:bg-yellow-950/30 rounded-xl text-center">
+                                        <span className="text-[10px] font-bold uppercase text-yellow-600">Dijemput</span>
+                                        <p className="text-lg font-black text-yellow-700 dark:text-yellow-400">{stats.sedangDijemput}</p>
+                                    </div>
+                                    <div className="p-2 bg-emerald-50 dark:bg-emerald-950/30 rounded-xl text-center">
+                                        <span className="text-[10px] font-bold uppercase text-wiz-green">Selesai</span>
+                                        <p className="text-lg font-black text-wiz-green dark:text-emerald-400">{stats.berhasil}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="mt-3 pt-2 text-[11px] text-gray-400 text-center border-t border-gray-100 dark:border-gray-700/60">
+                                Total Aktif: <b>{stats.totalAktif}</b> Kotak Pundi
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
 
-            {/* TUGAS PENARIKAN TAB */}
+            {/* =========================================================
+                TAB 2: TUGAS PENARIKAN (DENGAN FILTER ZONA & CHECKBOX)
+               ========================================================= */}
             {activeSubTab === 'tugas' && (
-                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 animate-in space-y-5">
+                <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 p-5 sm:p-6 animate-in space-y-5">
+                    {/* Header Tugas */}
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <div>
                             <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Antrean Penarikan Bulan Ini</h3>
                             <p className="text-sm text-gray-500">
                                 {selectedTaskIds.size > 0 ? (
-                                    <span className="font-bold text-wiz-green dark:text-emerald-400 bg-wiz-green/10 px-2 py-0.5 rounded">{selectedTaskIds.size} Pundi Dipilih</span>
+                                    <span className="font-bold text-wiz-green dark:text-emerald-400 bg-wiz-green/10 px-2.5 py-0.5 rounded-md">
+                                        {selectedTaskIds.size} Pundi Terpilih (Centang Tersimpan)
+                                    </span>
                                 ) : (
-                                    <span>Tersedia {filteredTugasPundis.length} pundi siap cetak.</span>
+                                    <span>Tersedia {filteredTugasPundis.length} dari {activePundisSorted.length} pundi siap cetak/dikunjungi.</span>
                                 )}
                             </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                             <button 
                                 onClick={toggleSelectAllFiltered} 
-                                className="px-3 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold transition-all flex items-center gap-1.5"
+                                className="px-3 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
                             >
-                                <i className={`fa-solid ${selectedTaskIds.size > 0 && selectedTaskIds.size === filteredTugasPundis.length ? 'fa-square-check text-wiz-green' : 'fa-square'}`}></i>
-                                <span>{selectedTaskIds.size > 0 && selectedTaskIds.size === filteredTugasPundis.length ? 'Batal Pilih' : 'Pilih Semua'}</span>
+                                <i className={`fa-solid ${filteredTugasPundis.length > 0 && filteredTugasPundis.every(p => selectedTaskIds.has(p.id)) ? 'fa-square-check text-wiz-green' : 'fa-square'}`}></i>
+                                <span>{filteredTugasPundis.length > 0 && filteredTugasPundis.every(p => selectedTaskIds.has(p.id)) ? 'Batal Pilih Hasil' : 'Pilih Semua Hasil'}</span>
                             </button>
-                            <Button onClick={() => setIsQuickScanOpen(true)} icon="fa-solid fa-qrcode" variant="accent" className="text-sm shadow-md">Pindai QR</Button>
-                            <Button onClick={handlePrintChecklist} icon="fa-solid fa-clipboard-check" variant="secondary" className="text-sm" disabled={filteredTugasPundis.length === 0}>
+                            <Button onClick={() => setIsQuickScanOpen(true)} icon="fa-solid fa-qrcode" variant="accent" className="text-xs shadow-md">Pindai</Button>
+                            <Button onClick={handlePrintChecklist} icon="fa-solid fa-clipboard-check" variant="secondary" className="text-xs" disabled={filteredTugasPundis.length === 0 && selectedTaskIds.size === 0}>
                                 Cetak Checklist ({selectedTaskIds.size > 0 ? selectedTaskIds.size : filteredTugasPundis.length})
                             </Button>
-                            <Button onClick={handlePrintNotaA4} icon="fa-solid fa-receipt" variant="primary" className="text-sm" disabled={filteredTugasPundis.length === 0}>
+                            <Button onClick={handlePrintNotaA4} icon="fa-solid fa-receipt" variant="primary" className="text-xs" disabled={filteredTugasPundis.length === 0 && selectedTaskIds.size === 0}>
                                 Cetak Nota ({selectedTaskIds.size > 0 ? selectedTaskIds.size : filteredTugasPundis.length})
                             </Button>
                         </div>
                     </div>
 
-                    <div className="bg-gray-50/70 dark:bg-gray-700/40 p-3.5 rounded-xl border border-gray-100 dark:border-gray-700 flex flex-col md:flex-row gap-3 items-center justify-between">
-                        <div className="w-full md:w-72 relative">
+                    {/* Baris Filter Tugas (Pencarian + Tipe + Zona + Urut + Status) */}
+                    <div className="bg-gray-50/70 dark:bg-gray-700/40 p-3.5 rounded-2xl border border-gray-100 dark:border-gray-700 flex flex-col md:flex-row gap-3 items-center justify-between">
+                        {/* Input Pencarian */}
+                        <div className="w-full md:w-64 relative">
                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
                                 <i className="fa-solid fa-magnifying-glass text-xs"></i>
                             </div>
@@ -1001,7 +1112,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 type="text"
                                 value={searchTugas}
                                 onChange={(e) => setSearchTugas(e.target.value)}
-                                placeholder="Cari No. Urut, lokasi, donatur..."
+                                placeholder="Cari No, donatur, usaha, zona..."
                                 className="w-full pl-8 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl text-xs focus:ring-2 focus:ring-wiz-green outline-none text-gray-800 dark:text-gray-100"
                             />
                             {searchTugas && (
@@ -1011,7 +1122,9 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                             )}
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-between sm:justify-end">
+                        {/* Filter Tipe, Zona, Rentang Urut, & Status */}
+                        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-between sm:justify-end">
+                            {/* Filter Tipe */}
                             <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
                                 <i className="fa-solid fa-tags text-xs text-wiz-green"></i>
                                 <select
@@ -1025,36 +1138,40 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 </select>
                             </div>
 
+                            {/* Filter Zona */}
+                            <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
+                                <i className="fa-solid fa-map-location-dot text-xs text-amber-500"></i>
+                                <select
+                                    value={zonaTugasFilter}
+                                    onChange={(e) => setZonaTugasFilter(e.target.value)}
+                                    className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer"
+                                >
+                                    <option value="Semua" className="dark:bg-gray-800">Semua Zona</option>
+                                    {allZonaOptions.map(z => <option key={z} value={z} className="dark:bg-gray-800">{z}</option>)}
+                                </select>
+                            </div>
+
+                            {/* Rentang Urut */}
                             <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
                                 <i className="fa-solid fa-arrow-down-1-9 text-xs text-wiz-green"></i>
-                                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Urut:</span>
                                 <input 
                                     type="number"
                                     value={urutAwal}
                                     onChange={(e) => setUrutAwal(e.target.value)}
                                     placeholder="Awal"
-                                    className="w-12 px-1 py-0.5 text-xs text-center font-bold bg-gray-50 dark:bg-gray-700/80 border border-gray-200 dark:border-gray-600 rounded focus:ring-1 focus:ring-wiz-green outline-none text-gray-800 dark:text-gray-100"
+                                    className="w-12 px-1 py-0.5 text-xs text-center font-bold bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded outline-none"
                                 />
-                                <span className="text-xs text-gray-400 font-bold">s/d</span>
+                                <span className="text-xs text-gray-400 font-bold">-</span>
                                 <input 
                                     type="number"
                                     value={urutAkhir}
                                     onChange={(e) => setUrutAkhir(e.target.value)}
                                     placeholder="Akhir"
-                                    className="w-12 px-1 py-0.5 text-xs text-center font-bold bg-gray-50 dark:bg-gray-700/80 border border-gray-200 dark:border-gray-600 rounded focus:ring-1 focus:ring-wiz-green outline-none text-gray-800 dark:text-gray-100"
+                                    className="w-12 px-1 py-0.5 text-xs text-center font-bold bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded outline-none"
                                 />
-                                {(urutAwal !== '' || urutAkhir !== '') && (
-                                    <button 
-                                        type="button" 
-                                        onClick={() => { setUrutAwal(''); setUrutAkhir(''); }}
-                                        className="text-gray-400 hover:text-red-500 text-xs px-1"
-                                        title="Reset rentang nomor urut"
-                                    >
-                                        <i className="fa-solid fa-circle-xmark"></i>
-                                    </button>
-                                )}
                             </div>
 
+                            {/* Status */}
                             <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-600 p-0.5 bg-white dark:bg-gray-800 shadow-sm">
                                 {[
                                     { id: 'Semua', label: 'Semua' },
@@ -1065,26 +1182,16 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                     <button
                                         key={item.id}
                                         onClick={() => setStatusTugasFilter(item.id)}
-                                        className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${statusTugasFilter === item.id ? 'bg-wiz-green text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100'}`}
+                                        className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${statusTugasFilter === item.id ? 'bg-wiz-green text-white shadow-sm' : 'text-gray-500'}`}
                                     >
                                         {item.label}
                                     </button>
                                 ))}
                             </div>
-
-                            {(searchTugas || statusTugasFilter !== 'Semua' || tipeTugasFilter !== 'Semua' || urutAwal !== '' || urutAkhir !== '') && (
-                                <button
-                                    onClick={() => { setSearchTugas(''); setStatusTugasFilter('Semua'); setTipeTugasFilter('Semua'); setUrutAwal(''); setUrutAkhir(''); }}
-                                    className="px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg font-semibold transition-colors flex items-center gap-1"
-                                    title="Reset Semua Filter Tugas"
-                                >
-                                    <i className="fa-solid fa-rotate-left"></i> Reset
-                                </button>
-                            )}
                         </div>
                     </div>
                     
-                    {/* TAMPILAN LIST TUGAS KHUSUS HP */}
+                    {/* TAMPILAN LIST TUGAS MOBILE */}
                     <div className="block md:hidden space-y-3">
                         {filteredTugasPundis.length === 0 ? (
                             <div className="p-8 text-center text-gray-400 bg-gray-50 dark:bg-gray-700/30 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 text-xs">
@@ -1094,46 +1201,38 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                             const currentRecord = visibleRiwayatPundis.find(r => String(r.pundiId) === String(p.id) && new Date(r.date).getMonth() === currentMonth && new Date(r.date).getFullYear() === currentYear);
                             const tStatus = currentRecord ? currentRecord.status : 'Belum';
                             const isChecked = selectedTaskIds.has(p.id);
-                            
-                            const rawPhone = String(p.phone || '').replace(/[^0-9]/g, '');
-                            let cleanPhone = rawPhone.startsWith('0') ? '62' + rawPhone.slice(1) : (rawPhone.startsWith('8') ? '62' + rawPhone : rawPhone);
 
                             return (
-                                <div key={p.id} className={`p-4 rounded-2xl border transition-all ${isChecked ? 'bg-wiz-green/5 dark:bg-emerald-950/30 border-wiz-green ring-1 ring-wiz-green' : tStatus === 'Berhasil' ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40' : tStatus === 'Dijemput' ? 'bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-800/30' : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 shadow-sm'}`}>
+                                <div key={p.id} className={`p-4 rounded-2xl border transition-all ${isChecked ? 'bg-wiz-green/10 border-wiz-green ring-1 ring-wiz-green' : tStatus === 'Berhasil' ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200' : tStatus === 'Dijemput' ? 'bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-200' : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 shadow-sm'}`}>
                                     <div className="flex items-start justify-between gap-3 mb-2.5">
-                                        <div className="flex items-center gap-3">
+                                        <div className="flex items-center gap-2.5">
                                             <input 
                                                 type="checkbox"
                                                 checked={isChecked}
                                                 onChange={() => toggleSelectTask(p.id)}
-                                                className="w-5 h-5 mt-0.5 text-wiz-green rounded-lg focus:ring-wiz-green cursor-pointer accent-wiz-green"
+                                                className="w-5 h-5 text-wiz-green rounded cursor-pointer accent-wiz-green"
                                             />
-                                            <span className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${tStatus === 'Berhasil' ? 'bg-wiz-green text-white shadow-sm' : tStatus === 'Dijemput' ? 'bg-yellow-500 text-white shadow-sm' : 'bg-wiz-orange/15 text-wiz-orange dark:bg-amber-900/30'}`}>
+                                            <span className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${tStatus === 'Berhasil' ? 'bg-wiz-green text-white' : tStatus === 'Dijemput' ? 'bg-yellow-500 text-white' : 'bg-wiz-orange/15 text-wiz-orange'}`}>
                                                 #{p.noUrut}
                                             </span>
                                             <div>
                                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                                    <h4 className="font-bold text-gray-800 dark:text-gray-100 text-sm leading-snug">{p.usaha}</h4>
-                                                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${p.tipePundi === 'Pundi Pribadi' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'}`}>
+                                                    <h4 className="font-bold text-gray-800 dark:text-gray-100 text-sm">{p.usaha}</h4>
+                                                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${p.tipePundi === 'Pundi Pribadi' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
                                                         {p.tipePundi === 'Pundi Pribadi' ? 'Pribadi' : 'Umum'}
                                                     </span>
+                                                    {p.zona && (
+                                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 text-amber-800">
+                                                            {p.zona}
+                                                        </span>
+                                                    )}
                                                 </div>
-                                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{p.donorName}</p>
+                                                <p className="text-xs text-gray-500 mt-0.5">{p.donorName}</p>
                                             </div>
                                         </div>
-                                        {tStatus === 'Berhasil' ? (
-                                            <span className="px-2 py-0.5 bg-wiz-green/10 text-wiz-green text-[10px] font-bold rounded-lg border border-wiz-green/20 shrink-0">
-                                                <i className="fa-solid fa-check"></i> Selesai
-                                            </span>
-                                        ) : tStatus === 'Dijemput' ? (
-                                            <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 text-[10px] font-bold rounded-lg border border-yellow-200 shrink-0">
-                                                <i className="fa-solid fa-box-open"></i> Dijemput
-                                            </span>
-                                        ) : (
-                                            <span className="px-2 py-0.5 bg-wiz-orange/10 text-wiz-orange text-[10px] font-bold rounded-lg border border-wiz-orange/20 shrink-0">
-                                                Belum
-                                            </span>
-                                        )}
+                                        <div>
+                                            <StatusBadge text={tStatus === 'Sudah Ditarik' ? 'Berhasil' : tStatus} />
+                                        </div>
                                     </div>
 
                                     <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 flex items-start gap-1.5 line-clamp-2">
@@ -1142,76 +1241,26 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                     </p>
 
                                     <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-100 dark:border-gray-700/60">
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                            {cleanPhone ? (
-                                                <a
-                                                    href={`https://wa.me/${cleanPhone}?text=Assalamu'alaikum%20Bapak/Ibu%20${encodeURIComponent(p.donorName)},%20kami%20dari%20petugas%20WIZ%20Berau%20terkait%20penjemputan%20kotak%20pundi...`}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="px-3 py-2 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
-                                                >
-                                                    <i className="fa-brands fa-whatsapp text-sm"></i> Chat WA
+                                        <div className="flex items-center gap-1.5">
+                                            {p.phone && (
+                                                <a href={`https://wa.me/${p.phone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="px-2.5 py-1.5 bg-emerald-50 text-emerald-600 rounded-xl text-xs font-bold flex items-center gap-1">
+                                                    <i className="fa-brands fa-whatsapp"></i> WA
                                                 </a>
-                                            ) : null}
-
-                                            {p.mapUrl ? (() => {
-                                                const mapUrls = typeof parseMapUrls === 'function' ? parseMapUrls(p.mapUrl) : { navUrl: p.mapUrl, webUrl: p.mapUrl };
-                                                return (
-                                                    <div className="flex items-center gap-1">
-                                                        <a
-                                                            href={mapUrls.navUrl}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="px-2.5 py-2 bg-wiz-green/10 hover:bg-wiz-green text-wiz-green hover:text-white dark:bg-emerald-900/30 dark:text-emerald-400 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors border border-wiz-green/20"
-                                                            title="Buka Navigasi Rute di HP"
-                                                        >
-                                                            <i className="fa-solid fa-mobile-screen text-xs"></i> Map HP
-                                                        </a>
-                                                        <a
-                                                            href={mapUrls.webUrl}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="px-2.5 py-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 text-blue-600 dark:text-blue-400 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors border border-blue-200 dark:border-blue-800"
-                                                            title="Buka di Web Maps"
-                                                        >
-                                                            <i className="fa-solid fa-globe text-xs"></i> Web
-                                                        </a>
-                                                    </div>
-                                                );
-                                            })() : null}
+                                            )}
                                         </div>
-
-                                        <div className="flex items-center gap-1.5 flex-wrap ml-auto">
+                                        <div className="flex items-center gap-1.5">
                                             {tStatus === 'Berhasil' ? (
-                                                <button 
-                                                    onClick={() => handleOpenEditRiwayat(currentRecord)} 
-                                                    className="px-3.5 py-2 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
-                                                >
-                                                    <i className="fa-solid fa-pen-to-square"></i> Edit Hasil
+                                                <button onClick={() => handleOpenEditRiwayat(currentRecord)} className="px-3 py-1.5 text-blue-600 bg-blue-50 rounded-xl text-xs font-bold">
+                                                    Edit Hasil
                                                 </button>
                                             ) : tStatus === 'Dijemput' ? (
-                                                <button 
-                                                    onClick={() => handleOpenEditRiwayat(currentRecord)} 
-                                                    className="px-3.5 py-2 text-white bg-wiz-green hover:bg-wiz-green_dark rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
-                                                >
-                                                    <i className="fa-solid fa-calculator"></i> Hitung Uang
+                                                <button onClick={() => handleOpenEditRiwayat(currentRecord)} className="px-3 py-1.5 text-white bg-wiz-green rounded-xl text-xs font-bold shadow-sm">
+                                                    Hitung Uang
                                                 </button>
                                             ) : (
-                                                <>
-                                                    <button 
-                                                        onClick={() => setIsQuickScanOpen(true)} 
-                                                        className="px-2.5 py-2 text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700/60 hover:bg-gray-200 rounded-xl text-[11px] font-bold transition-colors flex items-center gap-1"
-                                                    >
-                                                        <i className="fa-solid fa-qrcode"></i> Pindai
-                                                    </button>
-                                                    <Button 
-                                                        onClick={() => { setSelectedPundi(p); setIsInputModalOpen(true); }} 
-                                                        variant="accent" 
-                                                        className="text-[11px] py-1.5 px-3"
-                                                    >
-                                                        <i className="fa-solid fa-hand-holding-box mr-1"></i> Jemput
-                                                    </Button>
-                                                </>
+                                                <Button onClick={() => { setSelectedPundi(p); setIsInputModalOpen(true); }} variant="accent" className="text-xs py-1.5 px-3">
+                                                    Jemput
+                                                </Button>
                                             )}
                                         </div>
                                     </div>
@@ -1220,35 +1269,36 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                         })}
                     </div>
 
-                    {/* TAMPILAN TABEL STANDARD (DESKTOP/LAPTOP) */}
-                    <div className="hidden md:block overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-700">
+                    {/* TAMPILAN TABEL DESKTOP */}
+                    <div className="hidden md:block overflow-x-auto rounded-2xl border border-gray-100 dark:border-gray-700">
                         <table className="w-full text-left text-sm whitespace-nowrap">
                             <thead className="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-semibold border-b border-gray-100 dark:border-gray-700">
                                 <tr>
                                     <th className="px-4 py-3 text-center" style={{ width: '40px' }}>
                                         <input 
                                             type="checkbox"
-                                            checked={selectedTaskIds.size > 0 && selectedTaskIds.size === filteredTugasPundis.length}
+                                            checked={filteredTugasPundis.length > 0 && filteredTugasPundis.every(p => selectedTaskIds.has(p.id))}
                                             onChange={toggleSelectAllFiltered}
                                             className="w-4 h-4 text-wiz-green rounded cursor-pointer accent-wiz-green"
-                                            title="Pilih / Batal Pilih Semua"
                                         />
                                     </th>
                                     <th className="px-4 py-3 text-center">Urut</th>
-                                    <th className="px-4 py-3">Lokasi / Usaha</th>
-                                    <th className="px-4 py-3 text-center">Aksi Laporan</th>
+                                    <th className="px-4 py-3">Lokasi / Usaha & Zona</th>
+                                    <th className="px-4 py-3">Donatur & Alamat</th>
+                                    <th className="px-4 py-3 text-center">Status</th>
+                                    <th className="px-4 py-3 text-center">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
                                 {filteredTugasPundis.length === 0 ? (
-                                    <tr><td colSpan="4" className="px-4 py-8 text-center text-gray-400">Tidak ada data pundi yang cocok dengan filter tugas.</td></tr>
+                                    <tr><td colSpan="6" className="px-4 py-8 text-center text-gray-400">Tidak ada data pundi yang cocok.</td></tr>
                                 ) : filteredTugasPundis.map(p => {
                                     const currentRecord = visibleRiwayatPundis.find(r => String(r.pundiId) === String(p.id) && new Date(r.date).getMonth() === currentMonth && new Date(r.date).getFullYear() === currentYear);
                                     const tStatus = currentRecord ? currentRecord.status : 'Belum';
                                     const isChecked = selectedTaskIds.has(p.id);
-                                    
+
                                     return (
-                                        <tr key={p.id} className={`hover:bg-wiz-light dark:hover:bg-gray-700/50 ${isChecked ? 'bg-wiz-green/10 dark:bg-emerald-950/30' : tStatus === 'Berhasil' ? 'bg-wiz-green/5 dark:bg-emerald-900/10' : tStatus === 'Dijemput' ? 'bg-yellow-50 dark:bg-yellow-900/10' : ''}`}>
+                                        <tr key={p.id} className={`hover:bg-wiz-light dark:hover:bg-gray-700/50 ${isChecked ? 'bg-wiz-green/10' : ''}`}>
                                             <td className="px-4 py-3 text-center">
                                                 <input 
                                                     type="checkbox"
@@ -1257,83 +1307,40 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                                     className="w-4 h-4 text-wiz-green rounded cursor-pointer accent-wiz-green"
                                                 />
                                             </td>
-                                            <td className="px-4 py-3 text-center font-black text-gray-400">{p.noUrut}</td>
+                                            <td className="px-4 py-3 text-center font-black text-gray-400">#{p.noUrut}</td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center gap-2">
-                                                    <p className="font-bold text-gray-800 dark:text-gray-100">{p.usaha}</p>
-                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.tipePundi === 'Pundi Pribadi' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'}`}>
+                                                    <span className="font-bold text-gray-800 dark:text-gray-100">{p.usaha}</span>
+                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.tipePundi === 'Pundi Pribadi' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
                                                         {p.tipePundi || 'Pundi Umum'}
                                                     </span>
+                                                    {p.zona && (
+                                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                                            {p.zona}
+                                                        </span>
+                                                    )}
                                                 </div>
-                                                <p className="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
-                                                    <span>{p.donorName} • {p.alamat}</span>
-                                                    {p.mapUrl && (() => {
-                                                        const mapUrls = typeof parseMapUrls === 'function' ? parseMapUrls(p.mapUrl) : { navUrl: p.mapUrl, webUrl: p.mapUrl };
-                                                        return (
-                                                            <span className="inline-flex items-center gap-1.5 ml-1">
-                                                                <a
-                                                                    href={mapUrls.navUrl}
-                                                                    target="_blank"
-                                                                    rel="noreferrer"
-                                                                    className="text-wiz-green hover:text-wiz-green_dark dark:text-emerald-400 font-bold inline-flex items-center gap-1 text-xs"
-                                                                    title="Buka di HP"
-                                                                >
-                                                                    <i className="fa-solid fa-mobile-screen"></i> HP
-                                                                </a>
-                                                                <span className="text-gray-300">|</span>
-                                                                <a
-                                                                    href={mapUrls.webUrl}
-                                                                    target="_blank"
-                                                                    rel="noreferrer"
-                                                                    className="text-blue-500 hover:text-blue-700 dark:text-blue-400 font-bold inline-flex items-center gap-1 text-xs"
-                                                                    title="Buka di Web Maps"
-                                                                >
-                                                                    <i className="fa-solid fa-globe"></i> Web
-                                                                </a>
-                                                            </span>
-                                                        );
-                                                    })()}
-                                                </p>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <p className="font-semibold text-xs text-gray-700 dark:text-gray-200">{p.donorName}</p>
+                                                <p className="text-[11px] text-gray-400 truncate max-w-xs">{p.alamat}</p>
+                                            </td>
+                                            <td className="px-4 py-3 text-center">
+                                                <StatusBadge text={tStatus === 'Sudah Ditarik' ? 'Berhasil' : tStatus} />
                                             </td>
                                             <td className="px-4 py-3 text-center">
                                                 {tStatus === 'Berhasil' ? (
-                                                    <div className="flex items-center justify-center gap-2">
-                                                        <span className="text-xs font-bold text-wiz-green bg-wiz-green/10 px-3 py-1.5 rounded-lg"><i className="fa-solid fa-check mr-1"></i> Selesai</span>
-                                                        <button 
-                                                            onClick={() => handleOpenEditRiwayat(currentRecord)} 
-                                                            className="px-2.5 py-1.5 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/40 rounded-lg text-xs font-semibold flex items-center gap-1 border border-blue-200 dark:border-blue-800 transition-colors" 
-                                                            title="Edit Hasil Penarikan"
-                                                        >
-                                                            <i className="fa-solid fa-pen-to-square"></i> Edit
-                                                        </button>
-                                                    </div>
+                                                    <button onClick={() => handleOpenEditRiwayat(currentRecord)} className="px-2.5 py-1 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg text-xs font-bold">
+                                                        Edit Hasil
+                                                    </button>
                                                 ) : tStatus === 'Dijemput' ? (
-                                                    <div className="flex items-center justify-center gap-2">
-                                                        <span className="text-xs font-bold text-yellow-600 bg-yellow-100 px-3 py-1.5 rounded-lg"><i className="fa-solid fa-box-open mr-1"></i> Dijemput</span>
-                                                        <button 
-                                                            onClick={() => handleOpenEditRiwayat(currentRecord)} 
-                                                            className="px-2.5 py-1.5 text-white bg-wiz-green hover:bg-wiz-green_dark rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors shadow-sm" 
-                                                            title="Hitung uang sekarang"
-                                                        >
-                                                            <i className="fa-solid fa-calculator"></i> Hitung Uang
-                                                        </button>
-                                                    </div>
+                                                    <button onClick={() => handleOpenEditRiwayat(currentRecord)} className="px-2.5 py-1 text-white bg-wiz-green hover:bg-wiz-green_dark rounded-lg text-xs font-bold shadow-sm">
+                                                        Hitung Uang
+                                                    </button>
                                                 ) : (
-                                                    <div className="flex items-center justify-center gap-2">
-                                                        <button 
-                                                            onClick={() => setIsQuickScanOpen(true)} 
-                                                            className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[11px] font-bold transition-colors flex items-center gap-1"
-                                                        >
-                                                            <i className="fa-solid fa-qrcode"></i> Pindai
-                                                        </button>
-                                                        <Button 
-                                                            onClick={() => { setSelectedPundi(p); setIsInputModalOpen(true); }} 
-                                                            variant="accent" 
-                                                            className="text-[11px] py-1.5 px-3"
-                                                        >
-                                                            <i className="fa-solid fa-hand-holding-box mr-1"></i> Jemput Manual
-                                                        </Button>
-                                                    </div>
+                                                    <Button onClick={() => { setSelectedPundi(p); setIsInputModalOpen(true); }} variant="accent" className="text-xs py-1 px-3">
+                                                        Jemput
+                                                    </Button>
                                                 )}
                                             </td>
                                         </tr>
@@ -1342,194 +1349,367 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                             </tbody>
                         </table>
                     </div>
-
-                    <Modal isOpen={isInputModalOpen} onClose={() => { setIsInputModalOpen(false); setSelectedPundi(null); }} title={selectedPundi ? `Laporan Penarikan: ${selectedPundi.usaha}` : 'Laporan Penarikan'}>
-                        {selectedPundi && (
-                            <DynamicForm 
-                                schema={[
-                                    { name: 'date', label: 'Tanggal Penarikan', type: 'date', required: true },
-                                    { name: 'status', label: 'Status Penjemputan', type: 'select', options: [{value: 'Dijemput', label: 'Kotak Dijemput (Hitung Nanti)'}, {value: 'Berhasil', label: 'Langsung Dihitung (Selesai)'}, {value: 'Gagal', label: 'Gagal / Pundi Kosong'}], required: true },
-                                    { name: 'amount', label: 'Nominal Uang (Rp) - Jika Dihitung', isCurrency: true },
-                                    { name: 'receiptUrl', label: 'Foto Bukti Nota / Penarikan (Opsional)', type: 'file', fullWidth: true },
-                                    { name: 'notes', label: 'Keterangan (Opsional)', type: 'textarea' }
-                                ]}
-                                defaultValues={{ 
-                                    date: new Date().toISOString().split('T')[0], 
-                                    status: 'Dijemput' 
-                                }}
-                                onSubmit={submitInputHasil}
-                                onCancel={() => { setIsInputModalOpen(false); setSelectedPundi(null); }}
-                            />
-                        )}
-                    </Modal>
-
-                    <Modal isOpen={isQuickScanOpen} onClose={() => setIsQuickScanOpen(false)} title="Pindai QR Pundi (Penjemputan)">
-                        <div className="flex flex-col items-center justify-center pt-2 pb-4 px-2">
-                            <p className="text-xs text-gray-500 text-center mb-4">Arahkan kamera ke stiker QR untuk menjemput kotak ini.</p>
-                            <div className="w-full max-w-sm">
-                                <Html5QrcodePlugin qrCodeSuccessCallback={handleQuickScan} />
-                            </div>
-                            <div className="w-full mt-4">
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Ketik Nomor Urut Manual</p>
-                                <input
-                                    type="text"
-                                    onChange={(e) => handleQuickScan(e.target.value)}
-                                    placeholder="Contoh: 5"
-                                    className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-center font-mono text-sm focus:ring-2 focus:ring-wiz-green focus:border-wiz-green outline-none text-gray-800 dark:text-gray-100 shadow-inner font-bold"
-                                />
-                            </div>
-                        </div>
-                    </Modal>
                 </div>
             )}
 
-            {/* RIWAYAT PUNDI TAB */}
-            {activeSubTab === 'riwayat' && (
-                <div className="animate-in space-y-4">
-                    <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
+            {/* =========================================================
+                TAB 3: DATA MASTER PUNDI (DENGAN ZONA BEBAS KETIK)
+               ========================================================= */}
+            {activeSubTab === 'master' && (
+                <div className="space-y-4 animate-in">
+                    <div className="bg-white dark:bg-gray-800 p-4 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
                         <div className="flex flex-col md:flex-row gap-3">
+                            {/* Search Master */}
                             <div className="flex-1 relative">
                                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
                                     <i className="fa-solid fa-magnifying-glass"></i>
                                 </div>
                                 <input
                                     type="text"
-                                    value={searchRiwayat}
-                                    onChange={(e) => setSearchRiwayat(e.target.value)}
-                                    placeholder="Cari nama donatur, usaha, nomor pundi, catatan..."
-                                    className="w-full pl-10 pr-9 py-2 bg-gray-50 dark:bg-gray-700/70 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:ring-2 focus:ring-wiz-green focus:border-wiz-green outline-none text-gray-800 dark:text-gray-100 transition-all"
+                                    value={searchMaster}
+                                    onChange={(e) => setSearchMaster(e.target.value)}
+                                    placeholder="Cari No, donatur, usaha, alamat, zona..."
+                                    className="w-full pl-10 pr-9 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-sm outline-none focus:ring-2 focus:ring-wiz-green"
                                 />
-                                {searchRiwayat && (
-                                    <button onClick={() => setSearchRiwayat('')} className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                                        <i className="fa-solid fa-circle-xmark text-sm"></i>
-                                    </button>
-                                )}
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-2.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                                {/* Filter Zona Master */}
                                 <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700/70 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
-                                    <i className="fa-solid fa-calendar-days text-xs text-gray-400"></i>
-                                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Bulan:</span>
+                                    <i className="fa-solid fa-map-location-dot text-xs text-amber-500"></i>
                                     <select
-                                        value={monthRiwayatFilter}
-                                        onChange={(e) => setMonthRiwayatFilter(e.target.value)}
+                                        value={zonaMasterFilter}
+                                        onChange={(e) => setZonaMasterFilter(e.target.value)}
                                         className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer"
                                     >
-                                        <option value="Semua" className="dark:bg-gray-800">Semua Bulan</option>
-                                        {uniqueMonths.map(([key, label]) => (
-                                            <option key={key} value={key} className="dark:bg-gray-800">{label}</option>
-                                        ))}
+                                        <option value="Semua" className="dark:bg-gray-800">Semua Zona</option>
+                                        {allZonaOptions.map(z => <option key={z} value={z} className="dark:bg-gray-800">{z}</option>)}
                                     </select>
                                 </div>
 
+                                {/* Filter Tipe */}
                                 <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700/70 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
-                                    <i className="fa-solid fa-circle-check text-xs text-gray-400"></i>
-                                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Status:</span>
+                                    <i className="fa-solid fa-tags text-xs text-gray-400"></i>
                                     <select
-                                        value={statusRiwayatFilter}
-                                        onChange={(e) => setStatusRiwayatFilter(e.target.value)}
+                                        value={tipeMasterFilter}
+                                        onChange={(e) => setTipeMasterFilter(e.target.value)}
+                                        className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer"
+                                    >
+                                        <option value="Semua" className="dark:bg-gray-800">Semua Tipe</option>
+                                        <option value="Pundi Umum" className="dark:bg-gray-800">Pundi Umum</option>
+                                        <option value="Pundi Pribadi" className="dark:bg-gray-800">Pundi Pribadi</option>
+                                    </select>
+                                </div>
+
+                                {/* Filter Status */}
+                                <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700/70 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
+                                    <select
+                                        value={statusMasterFilter}
+                                        onChange={(e) => setStatusMasterFilter(e.target.value)}
                                         className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer"
                                     >
                                         <option value="Semua" className="dark:bg-gray-800">Semua Status</option>
+                                        <option value="Aktif" className="dark:bg-gray-800">Aktif</option>
+                                        <option value="Ditarik" className="dark:bg-gray-800">Ditarik</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <ModuleView 
+                        title="Data Kotak Pundi" 
+                        data={filteredMasterPundis} 
+                        columns={MasterPundiColumns} 
+                        schema={MasterPundiSchema} 
+                        defaultValues={{ noUrut: nextNoUrut, status: 'Aktif', tipePundi: 'Pundi Umum', zona: 'SEKITAR TANJUNG' }}
+                        onSave={savePundi} 
+                        onDelete={isAdmin ? deletePundi : null} 
+                        canDelete={isAdmin}
+                    />
+                </div>
+            )}
+
+            {/* =========================================================
+                TAB 4: RIWAYAT SEDEKAH PUNDI
+               ========================================================= */}
+            {activeSubTab === 'riwayat' && (
+                <div className="animate-in space-y-4">
+                    <div className="bg-white dark:bg-gray-800 p-4 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
+                        <div className="flex flex-col md:flex-row gap-3">
+                            <div className="flex-1 relative">
+                                <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                                <input
+                                    type="text"
+                                    value={searchRiwayat}
+                                    onChange={(e) => setSearchRiwayat(e.target.value)}
+                                    placeholder="Cari donatur, usaha, no pundi..."
+                                    className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-sm outline-none"
+                                />
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
+                                    <i className="fa-solid fa-calendar-days text-xs text-gray-400"></i>
+                                    <select
+                                        value={monthRiwayatFilter}
+                                        onChange={(e) => setMonthRiwayatFilter(e.target.value)}
+                                        className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none"
+                                    >
+                                        <option value="Semua" className="dark:bg-gray-800">Semua Bulan</option>
+                                        {uniqueMonths.map(([key, label]) => <option key={key} value={key} className="dark:bg-gray-800">{label}</option>)}
+                                    </select>
+                                </div>
+                                <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
+                                    <select
+                                        value={statusRiwayatFilter}
+                                        onChange={(e) => setStatusRiwayatFilter(e.target.value)}
+                                        className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none"
+                                    >
+                                        <option value="Semua" className="dark:bg-gray-800">Semua Status</option>
                                         <option value="Berhasil" className="dark:bg-gray-800">Berhasil (Dihitung)</option>
-                                        <option value="Dijemput" className="dark:bg-gray-800">Dijemput (Belum Dihitung)</option>
+                                        <option value="Dijemput" className="dark:bg-gray-800">Dijemput</option>
                                         <option value="Gagal" className="dark:bg-gray-800">Gagal</option>
                                     </select>
                                 </div>
-
-                                {isAdmin && uniqueAmils.length > 0 && (
-                                    <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700/70 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
-                                        <i className="fa-solid fa-user-check text-xs text-gray-400"></i>
-                                        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Petugas:</span>
-                                        <select
-                                            value={amilRiwayatFilter}
-                                            onChange={(e) => setAmilRiwayatFilter(e.target.value)}
-                                            className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer max-w-[130px] truncate"
-                                        >
-                                            <option value="Semua" className="dark:bg-gray-800">Semua Amil</option>
-                                            {uniqueAmils.map((amil, idx) => (
-                                                <option key={idx} value={amil} className="dark:bg-gray-800">{amil}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
-
-                                {(searchRiwayat || statusRiwayatFilter !== 'Semua' || monthRiwayatFilter !== 'Semua' || amilRiwayatFilter !== 'Semua') && (
-                                    <button
-                                        onClick={() => { setSearchRiwayat(''); setStatusRiwayatFilter('Semua'); setMonthRiwayatFilter('Semua'); setAmilRiwayatFilter('Semua'); }}
-                                        className="px-2.5 py-1.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg font-semibold transition-colors flex items-center gap-1"
-                                        title="Reset Semua Filter"
-                                    >
-                                        <i className="fa-solid fa-rotate-left"></i> Reset
-                                    </button>
-                                )}
                             </div>
-                        </div>
-
-                        <div className="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500 pt-1 border-t border-gray-50 dark:border-gray-700/50">
-                            <span>
-                                Menampilkan <b>{filteredRiwayatPundis.length}</b> transaksi | Total Tersaring: <b className="text-wiz-green dark:text-emerald-400">{typeof formatRp === 'function' ? formatRp(filteredRiwayatPundis.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0)) : filteredRiwayatPundis.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0)}</b>
-                            </span>
-                            {filteredRiwayatPundis.length === 0 && <span className="text-amber-500 font-medium">Tidak ada transaksi yang cocok dengan filter</span>}
                         </div>
                     </div>
 
                     <Table 
                         columns={[
                             { key: 'date', label: 'Tanggal', render: r => typeof formatDate === 'function' ? formatDate(r.date) : r.date },
-                            { key: 'donorName', label: 'Donatur & Usaha', render: r => <div><p className="font-bold">{r.donorName}</p><p className="text-xs text-gray-500">{r.usaha} (No. {r.noUrut})</p></div> },
-                            { key: 'amount', label: 'Nominal', render: r => <span className="font-bold text-wiz-green">{typeof formatRp === 'function' ? formatRp(r.amount) : r.amount}</span> },
-                            { key: 'status', label: 'Status', render: r => <span className={`px-2 py-1 rounded text-xs font-bold ${r.status === 'Berhasil' ? 'bg-wiz-green/10 text-wiz-green' : r.status === 'Dijemput' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' : 'bg-red-50 text-red-500'}`}>{r.status}</span> },
+                            { key: 'donorName', label: 'Donatur & Usaha', render: r => <div><p className="font-bold">{r.donorName}</p><p className="text-xs text-gray-500">{r.usaha} (#{r.noUrut})</p></div> },
+                            { key: 'amount', label: 'Nominal', render: r => <span className="font-bold text-wiz-green dark:text-emerald-400">{typeof formatRp === 'function' ? formatRp(r.amount) : r.amount}</span> },
+                            { key: 'status', label: 'Status', render: r => <StatusBadge text={r.status} /> },
                             { key: 'amilName', label: 'Amil Petugas' },
-                            { key: 'receiptUrl', label: 'Bukti Nota', render: r => {
-                                if (!r.receiptUrl || String(r.receiptUrl).trim() === '') return <span className="text-gray-300 dark:text-gray-600">-</span>;
-                                const thumbUrl = typeof getDirectImageUrl === 'function' ? getDirectImageUrl(r.receiptUrl) : r.receiptUrl;
-                                return (
-                                    <div className="relative group w-10 h-10">
-                                        <img 
-                                            src={thumbUrl} alt="Bukti Nota" 
-                                            onClick={() => setViewImage ? setViewImage({ direct: thumbUrl, original: r.receiptUrl }) : window.open(r.receiptUrl, '_blank')}
-                                            onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
-                                            className="w-10 h-10 object-cover rounded-lg border border-gray-200 dark:border-gray-600 cursor-pointer group-hover:opacity-75 transition-opacity shadow-sm" 
-                                            title="Klik untuk perbesar"
-                                        />
-                                        <div 
-                                            style={{display: 'none'}} 
-                                            onClick={() => setViewImage ? setViewImage({ direct: thumbUrl, original: r.receiptUrl }) : window.open(r.receiptUrl, '_blank')}
-                                            className="absolute inset-0 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 flex-col items-center justify-center cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-400 hover:text-wiz-orange transition-colors"
-                                        >
-                                            <i className="fa-solid fa-expand text-lg"></i>
-                                        </div>
-                                    </div>
-                                );
-                            }},
-                            { key: 'notes', label: 'Catatan', render: r => <span className="text-xs text-gray-500 dark:text-gray-400">{r.notes || '-'}</span> }
+                            { key: 'notes', label: 'Catatan', render: r => <span className="text-xs text-gray-500">{r.notes || '-'}</span> }
                         ]}
-                        data={[...filteredRiwayatPundis].sort((a,b) => new Date(b.date) - new Date(a.date))}
+                        data={[...filteredRiwayatPundis].sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0))}
                         onEdit={handleOpenEditRiwayat}
                         onDelete={isAdmin ? deleteRiwayat : null}
                     />
-
-                    <Modal isOpen={isEditRiwayatOpen} onClose={() => { setIsEditRiwayatOpen(false); setEditingRiwayat(null); }} title={`Edit Laporan: ${editingRiwayat?.usaha || ''}`}>
-                        {editingRiwayat && (
-                            <DynamicForm 
-                                schema={[
-                                    { name: 'date', label: 'Tanggal Penarikan', type: 'date', required: true },
-                                    { name: 'status', label: 'Status Penjemputan', type: 'select', options: [{value: 'Berhasil', label: 'Selesai Dihitung (Berhasil)'}, {value: 'Dijemput', label: 'Masih Dijemput (Belum Dihitung)'}, {value: 'Gagal', label: 'Gagal / Pundi Kosong'}], required: true },
-                                    { name: 'amount', label: 'Nominal Uang (Rp)', isCurrency: true },
-                                    { name: 'receiptUrl', label: 'Foto Bukti Nota / Penarikan (Opsional)', type: 'file', fullWidth: true },
-                                    { name: 'notes', label: 'Keterangan (Opsional)', type: 'textarea' }
-                                ]}
-                                initialData={editingRiwayat}
-                                onSubmit={saveEditRiwayat}
-                                onCancel={() => { setIsEditRiwayatOpen(false); setEditingRiwayat(null); }}
-                            />
-                        )}
-                    </Modal>
                 </div>
             )}
 
-            {/* MODAL CETAK STIKER QR PUNDI */}
+            {/* =========================================================
+                MODAL 1: PENGATURAN TARGET KHUSUS PUNDI (MANDIRI)
+               ========================================================= */}
+            <Modal isOpen={isTargetModalOpen} onClose={() => setIsTargetModalOpen(false)} title="Pengaturan Target Pundi (Harian, Bulanan, Tahunan)">
+                <form onSubmit={saveTargetConfig} className="space-y-4">
+                    <div className="p-3.5 bg-wiz-green/5 dark:bg-emerald-950/30 rounded-2xl border border-wiz-green/20">
+                        <p className="text-xs text-wiz-green dark:text-emerald-400 font-semibold leading-relaxed">
+                            <i className="fa-solid fa-bullseye mr-1.5"></i> Tentukan target penarikan <b>Harian, Bulanan, dan Tahunan</b> serta masa berlaku target. Target bulanan akan otomatis terhubung ke perhitungan persentase Dashboard sesuai bulan yang Anda pilih.
+                        </p>
+                    </div>
+
+                    {/* Masa Berlaku Target */}
+                    <div className="bg-gray-50 dark:bg-gray-700/50 p-3 rounded-2xl border border-gray-200 dark:border-gray-600 space-y-2">
+                        <span className="text-xs font-bold text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+                            <i className="fa-regular fa-calendar-days text-wiz-green"></i> Masa Periode Target
+                        </span>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-[11px] font-semibold text-gray-500 mb-1">Tanggal Mulai</label>
+                                <input 
+                                    type="date" 
+                                    name="startDate" 
+                                    required 
+                                    defaultValue={targetConfig.startDate} 
+                                    className="w-full p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold outline-none" 
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[11px] font-semibold text-gray-500 mb-1">Tanggal Akhir</label>
+                                <input 
+                                    type="date" 
+                                    name="endDate" 
+                                    required 
+                                    defaultValue={targetConfig.endDate} 
+                                    className="w-full p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold outline-none" 
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Target Pundi Umum */}
+                    <div className="bg-blue-50/60 dark:bg-blue-950/30 p-3.5 rounded-2xl border border-blue-200 dark:border-blue-800 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-black text-blue-700 dark:text-blue-300 uppercase tracking-wide flex items-center gap-1.5">
+                                <i className="fa-solid fa-store"></i> Target Pundi Umum (Toko / Usaha)
+                            </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Harian (Rp)</label>
+                                <input 
+                                    type="text" 
+                                    name="targetUmumHarian" 
+                                    required 
+                                    defaultValue={Number(targetConfig.umumHarian || 0).toLocaleString('id-ID')}
+                                    onInput={(e) => e.target.value = Number(e.target.value.replace(/\D/g, '')).toLocaleString('id-ID')}
+                                    className="w-full p-2 bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-700 rounded-xl font-bold text-blue-600 text-xs outline-none" 
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Bulanan (Rp)</label>
+                                <input 
+                                    type="text" 
+                                    name="targetUmumBulanan" 
+                                    required 
+                                    defaultValue={Number(targetConfig.umumBulanan || 0).toLocaleString('id-ID')}
+                                    onInput={(e) => e.target.value = Number(e.target.value.replace(/\D/g, '')).toLocaleString('id-ID')}
+                                    className="w-full p-2 bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-700 rounded-xl font-bold text-blue-600 text-xs outline-none" 
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Tahunan (Rp)</label>
+                                <input 
+                                    type="text" 
+                                    name="targetUmumTahunan" 
+                                    required 
+                                    defaultValue={Number(targetConfig.umumTahunan || 0).toLocaleString('id-ID')}
+                                    onInput={(e) => e.target.value = Number(e.target.value.replace(/\D/g, '')).toLocaleString('id-ID')}
+                                    className="w-full p-2 bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-700 rounded-xl font-bold text-blue-600 text-xs outline-none" 
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Target Pundi Pribadi */}
+                    <div className="bg-purple-50/60 dark:bg-purple-950/30 p-3.5 rounded-2xl border border-purple-200 dark:border-purple-800 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-black text-purple-700 dark:text-purple-300 uppercase tracking-wide flex items-center gap-1.5">
+                                <i className="fa-solid fa-house-user"></i> Target Pundi Pribadi (Rumah Tangga)
+                            </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Harian (Rp)</label>
+                                <input 
+                                    type="text" 
+                                    name="targetPribadiHarian" 
+                                    required 
+                                    defaultValue={Number(targetConfig.pribadiHarian || 0).toLocaleString('id-ID')}
+                                    onInput={(e) => e.target.value = Number(e.target.value.replace(/\D/g, '')).toLocaleString('id-ID')}
+                                    className="w-full p-2 bg-white dark:bg-gray-800 border border-purple-200 dark:border-purple-700 rounded-xl font-bold text-purple-600 text-xs outline-none" 
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Bulanan (Rp)</label>
+                                <input 
+                                    type="text" 
+                                    name="targetPribadiBulanan" 
+                                    required 
+                                    defaultValue={Number(targetConfig.pribadiBulanan || 0).toLocaleString('id-ID')}
+                                    onInput={(e) => e.target.value = Number(e.target.value.replace(/\D/g, '')).toLocaleString('id-ID')}
+                                    className="w-full p-2 bg-white dark:bg-gray-800 border border-purple-200 dark:border-purple-700 rounded-xl font-bold text-purple-600 text-xs outline-none" 
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Tahunan (Rp)</label>
+                                <input 
+                                    type="text" 
+                                    name="targetPribadiTahunan" 
+                                    required 
+                                    defaultValue={Number(targetConfig.pribadiTahunan || 0).toLocaleString('id-ID')}
+                                    onInput={(e) => e.target.value = Number(e.target.value.replace(/\D/g, '')).toLocaleString('id-ID')}
+                                    className="w-full p-2 bg-white dark:bg-gray-800 border border-purple-200 dark:border-purple-700 rounded-xl font-bold text-purple-600 text-xs outline-none" 
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-700">
+                        <Button variant="secondary" onClick={() => setIsTargetModalOpen(false)}>Tutup</Button>
+                        <Button type="submit" variant="primary">Simpan Target</Button>
+                    </div>
+                </form>
+            </Modal>
+
+            {/* =========================================================
+                MODAL 2: DAFTAR PUNDI BELUM DIJEMPUT
+               ========================================================= */}
+            <Modal isOpen={isBelumDijemputModalOpen} onClose={() => setIsBelumDijemputModalOpen(false)} title={`Daftar Pundi Belum Dijemput (${stats.belumDijemputCount})`}>
+                <div className="space-y-3">
+                    <p className="text-xs text-gray-500">Berikut adalah daftar kotak pundi aktif yang belum ditarik pada bulan yang dipilih:</p>
+                    <div className="max-h-[50vh] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                        {stats.belumDijemputCount === 0 ? (
+                            <div className="p-6 text-center text-gray-400 bg-gray-50 dark:bg-gray-700/30 rounded-2xl text-xs">
+                                <i className="fa-solid fa-circle-check text-wiz-green text-3xl mb-2"></i>
+                                <p className="font-bold">Alhamdulillah! Semua pundi aktif pada periode ini sudah berhasil ditarik.</p>
+                            </div>
+                        ) : (
+                            stats.pundiBelumDijemputList.map(p => (
+                                <div key={p.id} className="p-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl flex items-center justify-between gap-2 shadow-sm">
+                                    <div>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                            <span className="font-black text-xs text-wiz-green">#{p.noUrut}</span>
+                                            <span className="font-bold text-xs text-gray-800 dark:text-gray-100">{p.usaha}</span>
+                                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-gray-100 text-gray-600">{p.tipePundi || 'Umum'}</span>
+                                            {p.zona && <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-50 text-amber-600 font-bold">{p.zona}</span>}
+                                        </div>
+                                        <p className="text-[11px] text-gray-400 mt-0.5">{p.donorName} • {p.alamat}</p>
+                                    </div>
+                                    <Button 
+                                        variant="accent" 
+                                        className="text-[10px] py-1 px-2.5 shrink-0" 
+                                        onClick={() => { setIsBelumDijemputModalOpen(false); setSelectedPundi(p); setIsInputModalOpen(true); }}
+                                    >
+                                        Jemput
+                                    </Button>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </Modal>
+
+            {/* =========================================================
+                MODAL 3: INPUT / EDIT HASIL PENARIKAN PUNDI
+               ========================================================= */}
+            <Modal isOpen={isInputModalOpen || isEditRiwayatOpen} onClose={() => { setIsInputModalOpen(false); setIsEditRiwayatOpen(false); setSelectedPundi(null); setEditingRiwayat(null); }} title={selectedPundi ? `Penarikan: ${selectedPundi.usaha}` : `Edit Hasil: ${editingRiwayat?.usaha || ''}`}>
+                {(selectedPundi || editingRiwayat) && (
+                    <DynamicForm 
+                        schema={[
+                            { name: 'date', label: 'Tanggal Penarikan', type: 'date', required: true },
+                            { name: 'status', label: 'Status Penjemputan', type: 'select', options: [{value: 'Dijemput', label: 'Kotak Dijemput (Hitung Nanti)'}, {value: 'Berhasil', label: 'Langsung Dihitung (Selesai)'}, {value: 'Gagal', label: 'Gagal / Pundi Kosong'}], required: true },
+                            { name: 'amount', label: 'Nominal Uang (Rp) - Jika Dihitung', isCurrency: true },
+                            { name: 'receiptUrl', label: 'Foto Bukti / Nota (Opsional)', type: 'file', fullWidth: true },
+                            { name: 'notes', label: 'Catatan Keterangan', type: 'textarea' }
+                        ]}
+                        initialData={editingRiwayat}
+                        defaultValues={{ date: new Date().toISOString().split('T')[0], status: 'Dijemput' }}
+                        onSubmit={editingRiwayat ? saveEditRiwayat : submitInputHasil}
+                        onCancel={() => { setIsInputModalOpen(false); setIsEditRiwayatOpen(false); setSelectedPundi(null); setEditingRiwayat(null); }}
+                    />
+                )}
+            </Modal>
+
+            {/* =========================================================
+                MODAL 4: SCAN QR CEPAT
+               ========================================================= */}
+            <Modal isOpen={isQuickScanOpen} onClose={() => setIsQuickScanOpen(false)} title="Pindai QR Pundi (Penjemputan)">
+                <div className="flex flex-col items-center justify-center pt-2 pb-4 px-2">
+                    <p className="text-xs text-gray-500 text-center mb-4">Arahkan kamera ke stiker QR untuk menjemput kotak ini.</p>
+                    <div className="w-full max-w-sm">
+                        <Html5QrcodePlugin qrCodeSuccessCallback={handleQuickScan} />
+                    </div>
+                    <div className="w-full mt-4">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Atau Ketik Nomor Urut Manual</p>
+                        <input
+                            type="text"
+                            onChange={(e) => handleQuickScan(e.target.value)}
+                            placeholder="Contoh: 5"
+                            className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-center font-mono text-sm focus:ring-2 focus:ring-wiz-green outline-none text-gray-800 dark:text-gray-100 font-bold"
+                        />
+                    </div>
+                </div>
+            </Modal>
+
+            {/* =========================================================
+                MODAL 5: CETAK STIKER QR PUNDI
+               ========================================================= */}
             <Modal isOpen={!!printQR} onClose={() => setPrintQR(null)} title="Cetak Stiker Pundi">
                 {printQR && (
                     <div className="flex flex-col items-center space-y-6">
@@ -1548,31 +1728,4 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 <p className="text-3xl font-black">{printQR.noUrut}</p>
                             </div>
                             <p className="font-bold text-gray-800 text-sm line-clamp-2 mt-2">{printQR.usaha}</p>
-                            <p className="text-[10px] text-gray-400 mt-1">{printQR.donorName} {printQR.tipePundi ? `(${printQR.tipePundi})` : ''}</p>
-                        </div>
-                        
-                        <div className="flex gap-3 w-full mt-2">
-                            <Button variant="secondary" className="flex-1 py-3" onClick={() => setPrintQR(null)}>Tutup</Button>
-                            <Button variant="primary" className="flex-1 py-3" icon="fa-solid fa-print" onClick={() => {
-                                const printWindow = window.open('', '_blank');
-                                printWindow.document.write(`
-                                    <html><head><title>Stiker QR Pundi - No ${printQR.noUrut}</title>
-                                    <script src="https://cdn.tailwindcss.com"><\/script>
-                                    </head><body class="flex items-center justify-center p-10 bg-white">
-                                    ${document.getElementById('print-qr-area').outerHTML}
-                                    <script>setTimeout(() => { window.print(); }, 1000);<\/script>
-                                    </body></html>
-                                `);
-                                printWindow.document.close();
-                            }}>Cetak Stiker</Button>
-                        </div>
-                    </div>
-                )}
-            </Modal>
-        </div>
-    );
-};
-
-if (typeof window !== 'undefined') {
-    window.PundiView = PundiView;
-}
+                            <p
