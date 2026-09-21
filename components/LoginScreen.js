@@ -1,4 +1,4 @@
-const { useState } = React; // BARIS INI WAJIB ADA AGAR TIDAK BLANK
+// Komponen Layar Login Portal Amil
 
 const LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isRefreshing }) => {
     const [email, setEmail] = useState('');
@@ -84,10 +84,11 @@ const LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isR
                                 </div>
                             </div>
                         </div>
-                        <button type="submit" className="w-full py-3.5 text-[15px] mt-2 shadow-md bg-gradient-to-r from-wiz-orange to-[#fca545] hover:from-wiz-orange_dark hover:to-wiz-orange text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95">
+                        <Button type="submit" variant="accent" className="w-full py-3.5 text-[15px] mt-2 shadow-wiz-orange/30">
                             Masuk ke Dashboard <i className="fa-solid fa-arrow-right-to-bracket ml-1"></i>
-                        </button>
+                        </Button>
 
+                        {/* Tombol Refresh & Mode Malam */}
                         <div className="flex items-center justify-center gap-3 pt-3 border-t border-gray-100 dark:border-gray-700/70">
                             <button
                                 type="button"
@@ -118,8 +119,3 @@ const LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isR
         </div>
     );
 };
-
-// Pengaman Global agar bisa terbaca oleh file app.js
-if (typeof window !== 'undefined') {
-    window.LoginScreen = LoginScreen;
-}
