@@ -1,6 +1,6 @@
-// Komponen Layar Login Portal Amil
+const { useState } = React;
 
-const LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isRefreshing }) => {
+window.LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isRefreshing }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
