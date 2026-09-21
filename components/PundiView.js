@@ -1,6 +1,6 @@
-const { useState, useEffect, useMemo, useRef } = React;
+const { useState, useMemo, useEffect, useRef } = React;
 
-const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contacts, programs = [], user, syncDataToSheet, darkMode, setViewImage, amils = [], setActiveTab }) => {
+window.PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contacts, programs = [], user, syncDataToSheet, darkMode, setViewImage, amils = [], setActiveTab }) => {
     const [activeSubTab, setActiveSubTab] = useState('dashboard');
     const [selectedAmilFilter, setSelectedAmilFilter] = useState(user?.name || 'Semua');
     
@@ -12,7 +12,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     const [editingRiwayat, setEditingRiwayat] = useState(null);
     const [isEditRiwayatOpen, setIsEditRiwayatOpen] = useState(false);
 
-    // FITUR BARU: State untuk menyimpan data yang dicentang
+    // FITUR: State Checkbox Tugas Penarikan Akumulatif
     const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
 
     const [searchMaster, setSearchMaster] = useState('');
@@ -214,7 +214,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         });
     }, [activePundisSorted, visibleRiwayatPundis, searchTugas, statusTugasFilter, tipeTugasFilter, urutAwal, urutAkhir, currentMonth, currentYear]);
 
-    // FITUR BARU: Logika centang data
+    /* FITUR CHECKBOX AKUMULATIF */
     const toggleSelectTask = (id) => {
         const newSet = new Set(selectedTaskIds);
         if (newSet.has(id)) newSet.delete(id);
@@ -225,7 +225,6 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     const toggleSelectAllFiltered = () => {
         const newSet = new Set(selectedTaskIds);
         const isAllSelected = filteredTugasPundis.length > 0 && filteredTugasPundis.every(p => newSet.has(p.id));
-        
         if (isAllSelected) {
             filteredTugasPundis.forEach(p => newSet.delete(p.id));
         } else {
@@ -286,7 +285,6 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         }
     };
 
-    // FITUR BARU: Otomatis ubah status saat dicetak
     const markAsDijemput = (pundisToUpdate) => {
         const todayStr = new Date().toISOString().split('T')[0];
         let newRiwayat = [...riwayatPundis];
@@ -301,7 +299,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 }
             } else {
                 newRiwayat.push({
-                    id: Date.now() + Math.floor(Math.random() * 10000),
+                    id: Date.now() + Math.floor(Math.random() * 10000) + p.noUrut,
                     date: todayStr, pundiId: p.id, noUrut: p.noUrut, donorName: p.donorName, usaha: p.usaha,
                     amount: 0, status: 'Dijemput', amilName: user?.name || 'Amil', notes: 'Otomatis dicetak', receiptUrl: ''
                 });
@@ -311,12 +309,12 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
         if (isChanged) {
             setRiwayatPundis(newRiwayat);
-            if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', newRiwayat);
+            if(typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', newRiwayat);
         }
     };
 
     const handlePrintChecklist = () => {
-        const dataToPrint = selectedTaskIds.size > 0 ? activePundisSorted.filter(p => selectedTaskIds.has(p.id)) : filteredTugasPundis;
+        let dataToPrint = selectedTaskIds.size > 0 ? activePundisSorted.filter(p => selectedTaskIds.has(p.id)) : filteredTugasPundis;
         if (dataToPrint.length === 0) return;
 
         markAsDijemput(dataToPrint);
@@ -328,14 +326,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         
         const fontSize = totalItem > 25 ? '8px' : totalItem > 15 ? '9px' : '10px';
         const cellPadding = totalItem > 25 ? '2.5px 4px' : totalItem > 15 ? '3.5px 5px' : '5px 6px';
-
-        // FITUR BARU: Rentang Nomor Urut di Cetakan
-        let rangeKeterangan = '';
-        if (selectedTaskIds.size > 0) {
-            rangeKeterangan = `(${selectedTaskIds.size} Pilihan Ceklis)`;
-        } else if (urutAwal || urutAkhir) {
-            rangeKeterangan = `(Urut ${urutAwal || 'Awal'} - ${urutAkhir || 'Akhir'})`;
-        }
+        const rangeKeterangan = selectedTaskIds.size > 0 ? `(${selectedTaskIds.size} Pilihan Ceklis)` : (urutAwal || urutAkhir ? `(Urut ${urutAwal || '1'} - ${urutAkhir || 'Akhir'})` : '');
 
         let html = `
         <html>
@@ -393,8 +384,8 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                         <th class="text-center" style="width: 10%;">Reg</th>
                         <th style="width: 22%;">Nama Usaha / Titik</th>
                         <th style="width: 20%;">Donatur & Kontak</th>
-                        <th style="width: 23%;">Alamat Titik</th>
-                        <th style="width: 13%;">Nominal (Rp)</th>
+                        <th style="width: 25%;">Alamat Titik</th>
+                        <th style="width: 14%;">Nominal (Rp)</th>
                         <th class="text-center" style="width: 7%;">Cek</th>
                         <th class="text-center" style="width: 7%;">Paraf</th>
                     </tr>
@@ -420,8 +411,8 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
             <div class="footer-wrap">
                 <div class="summary-box">
-                    <b>Catatan Sistem:</b> Data yang dicetak ini telah <b>otomatis berubah statusnya menjadi "Dalam Penjemputan"</b> di aplikasi.<br/>
-                    Setelah penjemputan selesai, buka aplikasi menu Tugas dan klik <b>"Hitung Uang"</b> untuk memasukkan nominal.
+                    <b>Keterangan:</b> Beri tanda centang [✓] pada kolom Cek jika pundi berhasil dijemput.<br/>
+                    Total Titik Dicetak: <b>${totalItem} Pundi</b> | Status di sistem otomatis berubah menjadi <b>Dalam Penjemputan</b>.
                 </div>
                 <div class="ttd-block">
                     <p style="margin: 0;">Berau, ${tglCetak}</p>
@@ -453,18 +444,16 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             chunks.push(dataToPrint.slice(i, i + 10));
         }
 
-        let pagesHtml = chunks.map((group, pageIdx) => `
+        let pagesHtml = chunks.map((group) => `
             <div class="a4-page">
-                ${group.map((p, itemIdx) => {
-                    const runningNumber = (pageIdx * 10) + itemIdx + 1;
-                    return `
+                ${group.map(p => `
                     <div class="nota-card">
                         <div class="nota-header">
                             <div class="nota-brand">
                                 <span class="brand-wiz">WIZ</span><span class="brand-berau">BERAU</span>
                                 <span class="nota-title">BUKTI INFAQ / SEDEKAH PUNDI</span>
                             </div>
-                            <div class="badge-urut">Cetak #${runningNumber} | Reg #${p.noUrut}</div>
+                            <div class="badge-urut">NO. ${p.noUrut}</div>
                         </div>
                         
                         <div class="nota-body">
@@ -496,14 +485,14 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                             </div>
                         </div>
                     </div>
-                `}).join('')}
+                `).join('')}
             </div>
         `).join('');
 
         let html = `
         <html>
         <head>
-            <title>Cetak Nota Pundi A4 - WIZ Berau</title>
+            <title>Cetak 10 Nota Pundi A4 - WIZ Berau</title>
             <style>
                 @page { size: A4 portrait; margin: 6mm 7mm; }
                 * { box-sizing: border-box; }
@@ -622,11 +611,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             <div className="space-y-1">
                 <span className="truncate max-w-[200px] block text-gray-500">{r.alamat}</span>
                 {r.mapUrl ? (() => {
-                    // Coba mem-parsing URL Peta dengan aman
-                    let mapUrls = { navUrl: r.mapUrl, webUrl: r.mapUrl };
-                    if (typeof parseMapUrls === 'function') {
-                        mapUrls = parseMapUrls(r.mapUrl);
-                    }
+                    const mapUrls = typeof parseMapUrls === 'function' ? parseMapUrls(r.mapUrl) : { navUrl: r.mapUrl, webUrl: r.mapUrl };
                     return (
                         <div className="flex items-center gap-1.5 flex-wrap">
                             <a
@@ -656,7 +641,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         )},
         { key: 'status', label: 'Status', render: r => <span className={`px-2 py-1 rounded text-xs font-bold ${r.status === 'Aktif' ? 'bg-wiz-green/10 text-wiz-green' : 'bg-red-50 text-red-500'}`}>{r.status}</span> },
         { key: 'createdBy', label: 'Dibuat Oleh', render: r => {
-            const creator = r.createdBy || contacts.find(c => c.name === r.donorName)?.createdBy;
+            const creator = r.createdBy || (contacts || []).find(c => c.name === r.donorName)?.createdBy;
             return (
                 <div className="flex items-center gap-2">
                     <div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 flex items-center justify-center text-[10px] font-bold">
@@ -857,7 +842,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 </div>
             )}
 
-            {}
+            {/* MASTER PUNDI TAB */}
             {activeSubTab === 'master' && (
                 <div className="space-y-4 animate-in">
                     <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
@@ -966,7 +951,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 </div>
             )}
 
-            {}
+            {/* TUGAS PENARIKAN TAB */}
             {activeSubTab === 'tugas' && (
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 animate-in space-y-5">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -1110,7 +1095,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                             }
 
                             return (
-                                <div key={p.id} className={`p-4 rounded-2xl border transition-all ${isChecked ? 'bg-wiz-green/10 dark:bg-emerald-950/30 border-wiz-green ring-1 ring-wiz-green' : tStatus === 'Berhasil' ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40' : tStatus === 'Dijemput' ? 'bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-800/30' : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 shadow-sm'}`}>
+                                <div key={p.id} className={`p-4 rounded-2xl border transition-all ${isChecked ? 'bg-wiz-green/5 dark:bg-emerald-950/30 border-wiz-green ring-1 ring-wiz-green' : tStatus === 'Berhasil' ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40' : tStatus === 'Dijemput' ? 'bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-800/30' : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 shadow-sm'}`}>
                                     <div className="flex items-start justify-between gap-3 mb-2.5">
                                         <div className="flex items-center gap-2.5">
                                             <input 
@@ -1220,7 +1205,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                                         variant="accent" 
                                                         className="text-[11px] py-1.5 px-3"
                                                     >
-                                                        <i className="fa-solid fa-hand-holding-box mr-1"></i> Jemput Manual
+                                                        <i className="fa-solid fa-hand-holding-box mr-1"></i> Jemput
                                                     </Button>
                                                 </>
                                             )}
@@ -1394,7 +1379,6 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 </div>
             )}
 
-            {}
             {/* RIWAYAT PUNDI TAB */}
             {activeSubTab === 'riwayat' && (
                 <div className="animate-in space-y-4">
