@@ -1,6 +1,6 @@
 const { useState } = React;
 
-window.LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isRefreshing }) => {
+const LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isRefreshing }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
@@ -119,3 +119,5 @@ window.LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, is
         </div>
     );
 };
+
+if (typeof window !== 'undefined') window.LoginScreen = LoginScreen;
