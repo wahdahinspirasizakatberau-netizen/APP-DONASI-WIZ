@@ -1,4 +1,3 @@
-// Komponen Layar Login Portal Amil WIZ
 const { useState } = React; // BARIS INI WAJIB ADA AGAR TIDAK BLANK
 
 const LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isRefreshing }) => {
@@ -119,3 +118,8 @@ const LoginScreen = ({ onLogin, amilsData, darkMode, setDarkMode, onRefresh, isR
         </div>
     );
 };
+
+// Pengaman Global agar bisa terbaca oleh file app.js
+if (typeof window !== 'undefined') {
+    window.LoginScreen = LoginScreen;
+}
