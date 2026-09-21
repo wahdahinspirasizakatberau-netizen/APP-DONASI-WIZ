@@ -1,4 +1,4 @@
-// Controller Utama Aplikasi CRM WIZ Berau
+const { useState, useEffect, useMemo } = React;
 
 const App = () => {
     const safeGetJSON = (key, fallback) => {
