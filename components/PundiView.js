@@ -1,9 +1,9 @@
 // Komponen Manajemen Pundi WIZ (Dashboard, Tugas Penarikan, Master Pundi, Riwayat Sedekah, Cetak)
-// Versi Stabil Berdasarkan Kode Asli + Fitur Checkbox & Rentang Cetak Tugas Penarikan
+// Versi Stabil + Zona Wilayah Bebas Ketik + Deteksi & Salin Titik GPS Google Maps
 
 const { useState, useEffect, useMemo, useRef } = React;
 
-const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contacts, programs = [], user, syncDataToSheet, darkMode, setViewImage, amils = [], setActiveTab }) => {
+const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundis, contacts = [], programs = [], user, syncDataToSheet, darkMode, setViewImage, amils = [], setActiveTab }) => {
     const [activeSubTab, setActiveSubTab] = useState('dashboard');
     const [selectedAmilFilter, setSelectedAmilFilter] = useState(user?.name || 'Semua');
     
@@ -18,15 +18,43 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     // State Pilihan Data / Checkbox Tugas Penarikan
     const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
 
+    // State Bantuan GPS & Salin Link Lokasi
+    const [gpsLoading, setGpsLoading] = useState(false);
+    const [gpsSuccessMsg, setGpsSuccessMsg] = useState('');
+
+    // Opsi Default Zona Wilayah
+    const ZONA_DEFAULT_OPTIONS = [
+        'SEKITAR TANJUNG',
+        'MALAM',
+        'KOTAK AMAL',
+        'PASAR',
+        'SEGAH',
+        'TANJUNG BATU',
+        'BIDUK-BIDUK'
+    ];
+
+    // Mengumpulkan seluruh zona default + zona baru yang pernah diketik manual
+    const allZonaOptions = useMemo(() => {
+        const set = new Set(ZONA_DEFAULT_OPTIONS);
+        (pundis || []).forEach(p => {
+            if (p.zona && String(p.zona).trim()) {
+                set.add(String(p.zona).trim().toUpperCase());
+            }
+        });
+        return Array.from(set);
+    }, [pundis]);
+
     const [searchMaster, setSearchMaster] = useState('');
     const [statusMasterFilter, setStatusMasterFilter] = useState('Semua');
     const [creatorMasterFilter, setCreatorMasterFilter] = useState('Semua');
     const [tipeMasterFilter, setTipeMasterFilter] = useState('Semua');
+    const [zonaMasterFilter, setZonaMasterFilter] = useState('Semua');
     const [masterSortOrder, setMasterSortOrder] = useState('asc');
 
     const [searchTugas, setSearchTugas] = useState('');
     const [statusTugasFilter, setStatusTugasFilter] = useState('Semua');
     const [tipeTugasFilter, setTipeTugasFilter] = useState('Semua');
+    const [zonaTugasFilter, setZonaTugasFilter] = useState('Semua');
     const [urutAwal, setUrutAwal] = useState('');
     const [urutAkhir, setUrutAkhir] = useState('');
 
@@ -40,13 +68,53 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
     const yearOptions = Array.from({length: 7}, (_, i) => new Date().getFullYear() - 3 + i);
 
+    // Fungsi Mengambil Koordinat GPS Saat Ini dan Menyalin Tautan Google Maps
+    const handleGetCurrentLocationGPS = () => {
+        if (!navigator.geolocation) {
+            alert("Perangkat Anda tidak mendukung fitur pendeteksi lokasi GPS.");
+            return;
+        }
+
+        setGpsLoading(true);
+        setGpsSuccessMsg('');
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                setGpsLoading(false);
+                const lat = position.coords.latitude.toFixed(6);
+                const lng = position.coords.longitude.toFixed(6);
+                const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+
+                // Salin ke Clipboard
+                const tempTextArea = document.createElement('textarea');
+                tempTextArea.value = mapsUrl;
+                document.body.appendChild(tempTextArea);
+                tempTextArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempTextArea);
+
+                setGpsSuccessMsg(`Tautan lokasi berhasil disalin: ${mapsUrl}`);
+                setTimeout(() => setGpsSuccessMsg(''), 7000);
+            },
+            (error) => {
+                setGpsLoading(false);
+                let errText = "Gagal mendeteksi titik lokasi.";
+                if (error.code === 1) errText = "Izin akses lokasi GPS ditolak oleh peramban/HP.";
+                else if (error.code === 2) errText = "Posisi GPS tidak dapat ditemukan. Pastikan GPS HP aktif.";
+                else if (error.code === 3) errText = "Waktu permintaan GPS habis. Coba ulangi kembali.";
+                alert(errText);
+            },
+            { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+        );
+    };
+
     const handleOpenEditRiwayat = (row) => {
         setEditingRiwayat(row);
         setIsEditRiwayatOpen(true);
     };
 
     const saveEditRiwayat = (formData) => {
-        const updated = riwayatPundis.map(r => {
+        const updated = (riwayatPundis || []).map(r => {
             if (String(r.id) === String(editingRiwayat.id)) {
                 return {
                     ...r,
@@ -58,44 +126,42 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             return r;
         });
         setRiwayatPundis(updated);
-        syncDataToSheet('RiwayatPundi', updated);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', updated);
         setIsEditRiwayatOpen(false);
         setEditingRiwayat(null);
     };
 
     const deleteRiwayat = (row) => {
-        const updated = riwayatPundis.filter(r => String(r.id) !== String(row.id));
+        const updated = (riwayatPundis || []).filter(r => String(r.id) !== String(row.id));
         setRiwayatPundis(updated);
-        syncDataToSheet('RiwayatPundi', updated);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', updated);
     };
 
-    const isAdmin = user?.role === 'Admin';
-    const effectiveAmil = isAdmin ? selectedAmilFilter : user.name;
+    const isAdmin = String(user?.role || '').toLowerCase() === 'admin';
+    const effectiveAmil = isAdmin ? selectedAmilFilter : user?.name;
 
     const visiblePundis = useMemo(() => {
-        if (isAdmin && effectiveAmil === 'Semua') {
-            return pundis;
-        }
-        return pundis.filter(p => {
-            const creator = p.createdBy || contacts.find(c => c.name === p.donorName)?.createdBy;
+        const safePundis = Array.isArray(pundis) ? pundis : [];
+        if (isAdmin && effectiveAmil === 'Semua') return safePundis;
+        return safePundis.filter(p => {
+            const creator = p.createdBy || (Array.isArray(contacts) && contacts.find(c => c.name === p.donorName)?.createdBy);
             return creator === effectiveAmil;
         });
     }, [pundis, isAdmin, effectiveAmil, contacts]);
 
     const visibleRiwayatPundis = useMemo(() => {
-        if (isAdmin && effectiveAmil === 'Semua') {
-            return riwayatPundis;
-        }
-        return riwayatPundis.filter(r => r.amilName === effectiveAmil);
+        const safeRiwayat = Array.isArray(riwayatPundis) ? riwayatPundis : [];
+        if (isAdmin && effectiveAmil === 'Semua') return safeRiwayat;
+        return safeRiwayat.filter(r => r.amilName === effectiveAmil);
     }, [riwayatPundis, isAdmin, effectiveAmil]);
 
     const allAmilNames = useMemo(() => {
         const names = new Set((amils || []).map(a => a.name));
-        pundis.forEach(p => {
-            const c = p.createdBy || contacts.find(cnt => cnt.name === p.donorName)?.createdBy;
+        (pundis || []).forEach(p => {
+            const c = p.createdBy || (contacts || []).find(cnt => cnt.name === p.donorName)?.createdBy;
             if (c) names.add(c);
         });
-        riwayatPundis.forEach(r => {
+        (riwayatPundis || []).forEach(r => {
             if (r.amilName) names.add(r.amilName);
         });
         return Array.from(names).filter(Boolean);
@@ -117,7 +183,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     }, [visibleRiwayatPundis]);
 
     const activePundiCampaign = useMemo(() => {
-        return programs.find(p => p.status === 'Aktif' && ((p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'))));
+        return (programs || []).find(p => p.status === 'Aktif' && ((p.category && p.category.includes('Pundi')) || (p.name && p.name.toLowerCase().includes('pundi'))));
     }, [programs]);
 
     const currentMonth = new Date().getMonth();
@@ -167,7 +233,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
     const filteredMasterPundis = useMemo(() => {
         const filtered = visiblePundis.filter(p => {
-            const creator = p.createdBy || contacts.find(c => c.name === p.donorName)?.createdBy || '';
+            const creator = p.createdBy || (contacts || []).find(c => c.name === p.donorName)?.createdBy || '';
             const term = searchMaster.toLowerCase().trim();
             const matchSearch = !term ||
                 String(p.noUrut || '').toLowerCase().includes(term) ||
@@ -175,11 +241,13 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 String(p.usaha || '').toLowerCase().includes(term) ||
                 String(p.alamat || '').toLowerCase().includes(term) ||
                 String(p.tipePundi || '').toLowerCase().includes(term) ||
+                String(p.zona || '').toLowerCase().includes(term) ||
                 String(p.phone || '').toLowerCase().includes(term);
             const matchStatus = statusMasterFilter === 'Semua' || p.status === statusMasterFilter;
             const matchCreator = creatorMasterFilter === 'Semua' || creator === creatorMasterFilter;
             const matchTipe = tipeMasterFilter === 'Semua' || (p.tipePundi || 'Pundi Umum') === tipeMasterFilter;
-            return matchSearch && matchStatus && matchCreator && matchTipe;
+            const matchZona = zonaMasterFilter === 'Semua' || String(p.zona || '').toUpperCase() === String(zonaMasterFilter).toUpperCase();
+            return matchSearch && matchStatus && matchCreator && matchTipe && matchZona;
         });
 
         return filtered.sort((a, b) => {
@@ -187,7 +255,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             const numB = Number(b.noUrut) || 0;
             return masterSortOrder === 'asc' ? numA - numB : numB - numA;
         });
-    }, [visiblePundis, searchMaster, statusMasterFilter, creatorMasterFilter, tipeMasterFilter, masterSortOrder, contacts]);
+    }, [visiblePundis, searchMaster, statusMasterFilter, creatorMasterFilter, tipeMasterFilter, zonaMasterFilter, masterSortOrder, contacts]);
 
     const filteredTugasPundis = useMemo(() => {
         return activePundisSorted.filter(p => {
@@ -199,7 +267,8 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 String(p.noUrut || '').toLowerCase().includes(term) ||
                 String(p.donorName || '').toLowerCase().includes(term) ||
                 String(p.usaha || '').toLowerCase().includes(term) ||
-                String(p.alamat || '').toLowerCase().includes(term);
+                String(p.alamat || '').toLowerCase().includes(term) ||
+                String(p.zona || '').toLowerCase().includes(term);
             
             let matchStatus = false;
             if (statusTugasFilter === 'Semua') matchStatus = true;
@@ -208,16 +277,16 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             else if (statusTugasFilter === 'Sudah Ditarik' && pStatus === 'Berhasil') matchStatus = true;
 
             const matchTipe = tipeTugasFilter === 'Semua' || (p.tipePundi || 'Pundi Umum') === tipeTugasFilter;
+            const matchZona = zonaTugasFilter === 'Semua' || String(p.zona || '').toUpperCase() === String(zonaTugasFilter).toUpperCase();
 
             const pNo = Number(p.noUrut);
             const matchUrutAwal = urutAwal === '' || isNaN(Number(urutAwal)) || pNo >= Number(urutAwal);
             const matchUrutAkhir = urutAkhir === '' || isNaN(Number(urutAkhir)) || pNo <= Number(urutAkhir);
 
-            return matchSearch && matchStatus && matchTipe && matchUrutAwal && matchUrutAkhir;
+            return matchSearch && matchStatus && matchTipe && matchZona && matchUrutAwal && matchUrutAkhir;
         });
-    }, [activePundisSorted, visibleRiwayatPundis, searchTugas, statusTugasFilter, tipeTugasFilter, urutAwal, urutAkhir, currentMonth, currentYear]);
+    }, [activePundisSorted, visibleRiwayatPundis, searchTugas, statusTugasFilter, tipeTugasFilter, zonaTugasFilter, urutAwal, urutAkhir, currentMonth, currentYear]);
 
-    // Fungsi Pilihan Centang / Checkbox
     const toggleSelectTask = (id) => {
         const newSet = new Set(selectedTaskIds);
         if (newSet.has(id)) newSet.delete(id);
@@ -226,11 +295,14 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     };
 
     const toggleSelectAllFiltered = () => {
-        if (selectedTaskIds.size === filteredTugasPundis.length && filteredTugasPundis.length > 0) {
-            setSelectedTaskIds(new Set());
+        const newSet = new Set(selectedTaskIds);
+        const isAllSelected = filteredTugasPundis.length > 0 && filteredTugasPundis.every(p => newSet.has(p.id));
+        if (isAllSelected) {
+            filteredTugasPundis.forEach(p => newSet.delete(p.id));
         } else {
-            setSelectedTaskIds(new Set(filteredTugasPundis.map(p => p.id)));
+            filteredTugasPundis.forEach(p => newSet.add(p.id));
         }
+        setSelectedTaskIds(newSet);
     };
 
     const filteredRiwayatPundis = useMemo(() => {
@@ -257,7 +329,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
     }, [visibleRiwayatPundis, searchRiwayat, statusRiwayatFilter, monthRiwayatFilter, amilRiwayatFilter]);
     
     const nextNoUrut = useMemo(() => {
-        return pundis.reduce((max, p) => Math.max(max, Number(p.noUrut) || 0), 0) + 1;
+        return (pundis || []).reduce((max, p) => Math.max(max, Number(p.noUrut) || 0), 0) + 1;
     }, [pundis]);
 
     const handleQuickScan = (val) => {
@@ -267,9 +339,9 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         let foundPundi = null;
         if (cleanVal.includes('WIZ-PUNDI-')) {
             const extractedId = cleanVal.split('WIZ-PUNDI-')[1].trim();
-            foundPundi = pundis.find(p => String(p.id) === String(extractedId));
+            foundPundi = (pundis || []).find(p => String(p.id) === String(extractedId));
         } else if (!isNaN(cleanVal) && cleanVal.length > 0) {
-            foundPundi = pundis.find(p => String(p.noUrut) === cleanVal);
+            foundPundi = (pundis || []).find(p => String(p.noUrut) === cleanVal);
         }
 
         if (foundPundi) {
@@ -287,7 +359,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
     const markAsDijemput = (pundisToUpdate) => {
         const todayStr = new Date().toISOString().split('T')[0];
-        let newRiwayat = [...riwayatPundis];
+        let newRiwayat = [...(riwayatPundis || [])];
         let isChanged = false;
 
         pundisToUpdate.forEach(p => {
@@ -299,7 +371,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 }
             } else {
                 newRiwayat.push({
-                    id: Date.now() + Math.floor(Math.random() * 10000),
+                    id: Date.now() + Math.floor(Math.random() * 10000) + Number(p.noUrut || 0),
                     date: todayStr, pundiId: p.id, noUrut: p.noUrut, donorName: p.donorName, usaha: p.usaha,
                     amount: 0, status: 'Dijemput', amilName: user?.name || 'Amil', notes: 'Otomatis dicetak', receiptUrl: ''
                 });
@@ -309,18 +381,16 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
         if (isChanged) {
             setRiwayatPundis(newRiwayat);
-            syncDataToSheet('RiwayatPundi', newRiwayat);
+            if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', newRiwayat);
         }
     };
 
     const handlePrintChecklist = () => {
-        // Ambil data yang dicentang, jika tidak ada dicentang cetak seluruh hasil filter
         const dataToPrint = selectedTaskIds.size > 0 
-            ? filteredTugasPundis.filter(p => selectedTaskIds.has(p.id)) 
+            ? activePundisSorted.filter(p => selectedTaskIds.has(p.id)) 
             : filteredTugasPundis;
         if (dataToPrint.length === 0) return;
 
-        // Otomatis tandai sebagai dalam proses penjemputan
         markAsDijemput(dataToPrint);
 
         const printWindow = window.open('', '_blank');
@@ -330,9 +400,8 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
         
         const fontSize = totalItem > 25 ? '8px' : totalItem > 15 ? '9px' : '10px';
         const cellPadding = totalItem > 25 ? '2.5px 4px' : totalItem > 15 ? '3.5px 5px' : '5px 6px';
-
         const rangeKeterangan = selectedTaskIds.size > 0 
-            ? `(${selectedTaskIds.size} Pundi Dipilih)` 
+            ? `(${selectedTaskIds.size} Pilihan Ceklis Manual)` 
             : (urutAwal || urutAkhir ? `(Urut ${urutAwal || '1'} - ${urutAkhir || 'Akhir'})` : '');
 
         let html = `
@@ -356,6 +425,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 th { background-color: #27745F; color: #ffffff; font-weight: 800; text-transform: uppercase; font-size: 8.5px; letter-spacing: 0.2px; }
                 tr { page-break-inside: avoid; }
                 .text-center { text-align: center; }
+                .run-no { font-weight: bold; color: #475569; width: 5%; }
                 .no-col { font-weight: 900; color: #166534; font-size: 10px; background: #f0fdf4; }
                 .cell-truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                 .alamat-text { font-size: 8px; color: #475569; line-height: 1.1; }
@@ -386,21 +456,21 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             <table>
                 <thead>
                     <tr>
-                        <th class="text-center" style="width: 5%;">No</th>
+                        <th class="text-center run-no">No</th>
                         <th class="text-center" style="width: 10%;">Reg</th>
                         <th style="width: 22%;">Nama Usaha / Titik</th>
                         <th style="width: 20%;">Donatur & Kontak</th>
-                        <th style="width: 24%;">Alamat Titik</th>
-                        <th style="width: 12%;">Nominal (Rp)</th>
+                        <th style="width: 23%;">Alamat Titik</th>
+                        <th style="width: 13%;">Nominal (Rp)</th>
                         <th class="text-center" style="width: 7%;">Cek</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${dataToPrint.map((p, idx) => `
                         <tr>
-                            <td class="text-center" style="font-weight: bold; color: #64748b;">${idx + 1}</td>
+                            <td class="text-center run-no">${idx + 1}</td>
                             <td class="text-center no-col">#${p.noUrut || '-'}</td>
-                            <td><b style="color: #0f172a;">${p.usaha || '-'}</b></td>
+                            <td><b style="color: #0f172a;">${p.usaha || '-'}</b> ${p.zona ? `<span style="font-size:7px; background:#e0f2fe; color:#0369a1; padding:1px 3px; border-radius:3px;">${p.zona}</span>` : ''}</td>
                             <td>
                                 <div class="cell-truncate"><b>${p.donorName || '-'}</b></div>
                                 <div style="font-size: 7.5px; color: #64748b;">${p.phone || '-'}</div>
@@ -435,11 +505,10 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
     const handlePrintNotaA4 = () => {
         const dataToPrint = selectedTaskIds.size > 0 
-            ? filteredTugasPundis.filter(p => selectedTaskIds.has(p.id)) 
+            ? activePundisSorted.filter(p => selectedTaskIds.has(p.id)) 
             : filteredTugasPundis;
         if (dataToPrint.length === 0) return;
 
-        // Otomatis tandai sebagai dalam proses penjemputan
         markAsDijemput(dataToPrint);
 
         const printWindow = window.open('', '_blank');
@@ -545,29 +614,30 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
 
     const savePundi = (formData, isEdit) => {
         const now = new Date().toISOString();
-        const existing = isEdit ? pundis.find(p => String(p.id) === String(formData.id)) : null;
+        const existing = isEdit ? (pundis || []).find(p => String(p.id) === String(formData.id)) : null;
         let newData = { 
             ...(existing || {}),
             ...formData, 
             tipePundi: formData.tipePundi || (existing && existing.tipePundi) || 'Pundi Umum',
+            zona: (formData.zona || (existing && existing.zona) || 'SEKITAR TANJUNG').toString().trim().toUpperCase(),
             updatedAt: now 
         };
         if (!isEdit) {
             newData.id = Date.now();
             newData.createdAt = now;
-            newData.createdBy = user.name;
+            newData.createdBy = user?.name || 'Amil';
         }
         const updatedList = isEdit 
-            ? pundis.map(p => String(p.id) === String(newData.id) ? newData : p) 
-            : [...pundis, newData];
+            ? (pundis || []).map(p => String(p.id) === String(newData.id) ? newData : p) 
+            : [...(pundis || []), newData];
         setPundis(updatedList);
-        syncDataToSheet('Pundi', updatedList);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('Pundi', updatedList);
     };
 
     const deletePundi = (row) => {
-        const updatedList = pundis.filter(p => String(p.id) !== String(row.id));
+        const updatedList = (pundis || []).filter(p => String(p.id) !== String(row.id));
         setPundis(updatedList);
-        syncDataToSheet('Pundi', updatedList);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('Pundi', updatedList);
     };
 
     const submitInputHasil = (formData) => {
@@ -579,27 +649,28 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
             noUrut: selectedPundi.noUrut,
             donorName: selectedPundi.donorName,
             usaha: selectedPundi.usaha,
-            amount: formData.amount || 0,
+            amount: Number(formData.amount || 0),
             status: formData.status,
-            amilName: user.name,
+            amilName: user?.name || 'Amil',
             notes: formData.notes || '',
             receiptUrl: formData.receiptUrl || ''
         };
-        const updatedRiwayat = [...riwayatPundis, transaction];
+        const updatedRiwayat = [...(riwayatPundis || []), transaction];
         setRiwayatPundis(updatedRiwayat);
-        syncDataToSheet('RiwayatPundi', updatedRiwayat);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', updatedRiwayat);
         setIsInputModalOpen(false);
     };
 
     const MasterPundiSchema = [
         { name: 'noUrut', label: 'Nomor Urut Penarikan (Angka)', type: 'number', required: true },
         { name: 'tipePundi', label: 'Jenis / Tipe Pundi', type: 'select', options: ['Pundi Umum', 'Pundi Pribadi'], required: true },
+        { name: 'zona', label: 'Zona Wilayah Pundi (Pilih / Ketik Bebas Manual)', type: 'datalist', options: allZonaOptions, required: true },
         { name: 'donorName', label: 'Nama Donatur (Ketik Manual)', type: 'text', required: true },
         { name: 'phone', label: 'Nomor Telp / WhatsApp', type: 'text', required: true },
         { name: 'usaha', label: 'Nama Usaha / Lokasi Titik', required: true },
         { name: 'status', label: 'Status Pundi', type: 'select', options: ['Aktif', 'Ditarik'], required: true },
         { name: 'alamat', label: 'Alamat Spesifik Pundi', type: 'berau_address', fullWidth: true, required: true },
-        { name: 'mapUrl', label: 'Titik Lokasi Google Maps (GPS)', type: 'map_location', fullWidth: true }
+        { name: 'mapUrl', label: 'Titik Lokasi Google Maps (GPS) - Tempel Link / Titik', type: 'map_location', fullWidth: true }
     ];
 
     const MasterPundiColumns = [
@@ -611,6 +682,11 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                     <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${r.tipePundi === 'Pundi Pribadi' ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-300 border-purple-200 dark:border-purple-800' : 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-800'}`}>
                         {r.tipePundi || 'Pundi Umum'}
                     </span>
+                    {r.zona && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                            <i className="fa-solid fa-location-dot mr-0.5"></i> {r.zona}
+                        </span>
+                    )}
                 </div>
                 <p className="text-xs text-wiz-orange dark:text-amber-400 font-medium mt-0.5"><i className="fa-solid fa-store mr-1"></i> {r.usaha}</p>
                 {r.phone && <p className="text-[11px] text-gray-500 mt-0.5"><i className="fa-brands fa-whatsapp text-green-500 mr-1"></i> {r.phone}</p>}
@@ -851,9 +927,55 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                 </div>
             )}
 
-            {/* MASTER PUNDI TAB */}
+            {/* MASTER PUNDI TAB DENGAN ALAT BANTU GPS */}
             {activeSubTab === 'master' && (
                 <div className="space-y-4 animate-in">
+                    {/* Banner Alat Bantu GPS Google Maps */}
+                    <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-white dark:from-emerald-950/40 dark:via-gray-800 dark:to-gray-800 p-4 rounded-3xl border border-emerald-200 dark:border-emerald-800 shadow-sm space-y-2">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <div>
+                                <h4 className="text-sm font-black text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                                    <span className="w-7 h-7 rounded-lg bg-wiz-green text-white flex items-center justify-center text-xs shadow-sm">
+                                        <i className="fa-solid fa-location-crosshairs"></i>
+                                    </span>
+                                    Alat Bantu Titik Lokasi Google Maps (GPS)
+                                </h4>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                    Sedang berada di lokasi pundi? Klik tombol untuk mengambil titik koordinat GPS saat ini dan menyalinnya langsung ke papan klip.
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={handleGetCurrentLocationGPS}
+                                    disabled={gpsLoading}
+                                    className="px-3.5 py-2 bg-wiz-green hover:bg-wiz-green_dark text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                                >
+                                    <i className={`fa-solid ${gpsLoading ? 'fa-spinner fa-spin' : 'fa-location-arrow'}`}></i>
+                                    <span>{gpsLoading ? 'Mendeteksi...' : '📍 Ambil & Salin Titik GPS'}</span>
+                                </button>
+                                <a
+                                    href="https://www.google.com/maps"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-3 py-2 bg-white dark:bg-gray-700 hover:bg-gray-100 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+                                >
+                                    <i className="fa-solid fa-map-location-dot text-blue-500"></i>
+                                    <span>Buka Maps</span>
+                                </a>
+                            </div>
+                        </div>
+
+                        {gpsSuccessMsg && (
+                            <div className="p-2.5 bg-emerald-100/80 dark:bg-emerald-900/50 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs text-emerald-800 dark:text-emerald-200 font-semibold flex items-center gap-2 animate-in">
+                                <i className="fa-solid fa-circle-check text-emerald-600"></i>
+                                <span className="truncate">{gpsSuccessMsg}</span>
+                                <span className="text-[10px] ml-auto bg-emerald-200 dark:bg-emerald-800 px-2 py-0.5 rounded font-bold">Siap Ditempel</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Filter Master Pundi (Termasuk Filter Zona) */}
                     <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
                         <div className="flex flex-col md:flex-row gap-3">
                             <div className="flex-1 relative">
@@ -864,7 +986,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                     type="text"
                                     value={searchMaster}
                                     onChange={(e) => setSearchMaster(e.target.value)}
-                                    placeholder="Cari No. Urut, nama donatur, tipe pundi, usaha, alamat, no. HP..."
+                                    placeholder="Cari No. Urut, nama donatur, tipe, zona, usaha, alamat, HP..."
                                     className="w-full pl-10 pr-9 py-2 bg-gray-50 dark:bg-gray-700/70 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:ring-2 focus:ring-wiz-green focus:border-wiz-green outline-none text-gray-800 dark:text-gray-100 transition-all"
                                 />
                                 {searchMaster && (
@@ -883,6 +1005,22 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                     <i className={`fa-solid ${masterSortOrder === 'asc' ? 'fa-arrow-down-1-9' : 'fa-arrow-up-9-1'} text-xs text-wiz-green dark:text-emerald-400`}></i>
                                     <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Urutkan</span>
                                 </button>
+
+                                {/* Filter Zona Master */}
+                                <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700/70 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
+                                    <i className="fa-solid fa-map-location-dot text-xs text-amber-500"></i>
+                                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Zona:</span>
+                                    <select
+                                        value={zonaMasterFilter}
+                                        onChange={(e) => setZonaMasterFilter(e.target.value)}
+                                        className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer max-w-[120px] truncate"
+                                    >
+                                        <option value="Semua" className="dark:bg-gray-800">Semua Zona</option>
+                                        {allZonaOptions.map(z => (
+                                            <option key={z} value={z} className="dark:bg-gray-800">{z}</option>
+                                        ))}
+                                    </select>
+                                </div>
 
                                 <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-700/70 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
                                     <i className="fa-solid fa-tags text-xs text-gray-400"></i>
@@ -929,9 +1067,9 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                     </div>
                                 )}
 
-                                {(searchMaster || statusMasterFilter !== 'Semua' || creatorMasterFilter !== 'Semua' || tipeMasterFilter !== 'Semua' || masterSortOrder !== 'asc') && (
+                                {(searchMaster || statusMasterFilter !== 'Semua' || creatorMasterFilter !== 'Semua' || tipeMasterFilter !== 'Semua' || zonaMasterFilter !== 'Semua' || masterSortOrder !== 'asc') && (
                                     <button
-                                        onClick={() => { setSearchMaster(''); setStatusMasterFilter('Semua'); setCreatorMasterFilter('Semua'); setTipeMasterFilter('Semua'); setMasterSortOrder('asc'); }}
+                                        onClick={() => { setSearchMaster(''); setStatusMasterFilter('Semua'); setCreatorMasterFilter('Semua'); setTipeMasterFilter('Semua'); setZonaMasterFilter('Semua'); setMasterSortOrder('asc'); }}
                                         className="px-2.5 py-1.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg font-semibold transition-colors flex items-center gap-1"
                                         title="Reset Semua Filter"
                                     >
@@ -952,7 +1090,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                         data={filteredMasterPundis} 
                         columns={MasterPundiColumns} 
                         schema={MasterPundiSchema} 
-                        defaultValues={{ noUrut: nextNoUrut, status: 'Aktif', tipePundi: 'Pundi Umum' }}
+                        defaultValues={{ noUrut: nextNoUrut, status: 'Aktif', tipePundi: 'Pundi Umum', zona: 'SEKITAR TANJUNG' }}
                         onSave={savePundi} 
                         onDelete={isAdmin ? deletePundi : null} 
                         canDelete={isAdmin}
@@ -979,8 +1117,8 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 onClick={toggleSelectAllFiltered} 
                                 className="px-3 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold transition-all flex items-center gap-1.5"
                             >
-                                <i className={`fa-solid ${selectedTaskIds.size > 0 && selectedTaskIds.size === filteredTugasPundis.length ? 'fa-square-check text-wiz-green' : 'fa-square'}`}></i>
-                                <span>{selectedTaskIds.size > 0 && selectedTaskIds.size === filteredTugasPundis.length ? 'Batal Pilih' : 'Pilih Semua'}</span>
+                                <i className={`fa-solid ${filteredTugasPundis.length > 0 && filteredTugasPundis.every(p => selectedTaskIds.has(p.id)) ? 'fa-square-check text-wiz-green' : 'fa-square'}`}></i>
+                                <span>{filteredTugasPundis.length > 0 && filteredTugasPundis.every(p => selectedTaskIds.has(p.id)) ? 'Batal Pilih' : 'Pilih Semua'}</span>
                             </button>
                             <Button onClick={() => setIsQuickScanOpen(true)} icon="fa-solid fa-qrcode" variant="accent" className="text-sm shadow-md">Pindai QR</Button>
                             <Button onClick={handlePrintChecklist} icon="fa-solid fa-clipboard-check" variant="secondary" className="text-sm" disabled={filteredTugasPundis.length === 0}>
@@ -1001,7 +1139,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 type="text"
                                 value={searchTugas}
                                 onChange={(e) => setSearchTugas(e.target.value)}
-                                placeholder="Cari No. Urut, lokasi, donatur..."
+                                placeholder="Cari No. Urut, zona, lokasi, donatur..."
                                 className="w-full pl-8 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl text-xs focus:ring-2 focus:ring-wiz-green outline-none text-gray-800 dark:text-gray-100"
                             />
                             {searchTugas && (
@@ -1012,6 +1150,21 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-between sm:justify-end">
+                            {/* Filter Zona Tugas */}
+                            <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
+                                <i className="fa-solid fa-map-location-dot text-xs text-amber-500"></i>
+                                <select
+                                    value={zonaTugasFilter}
+                                    onChange={(e) => setZonaTugasFilter(e.target.value)}
+                                    className="bg-transparent text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer"
+                                >
+                                    <option value="Semua" className="dark:bg-gray-800">Semua Zona</option>
+                                    {allZonaOptions.map(z => (
+                                        <option key={z} value={z} className="dark:bg-gray-800">{z}</option>
+                                    ))}
+                                </select>
+                            </div>
+
                             <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
                                 <i className="fa-solid fa-tags text-xs text-wiz-green"></i>
                                 <select
@@ -1072,9 +1225,9 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                 ))}
                             </div>
 
-                            {(searchTugas || statusTugasFilter !== 'Semua' || tipeTugasFilter !== 'Semua' || urutAwal !== '' || urutAkhir !== '') && (
+                            {(searchTugas || statusTugasFilter !== 'Semua' || tipeTugasFilter !== 'Semua' || zonaTugasFilter !== 'Semua' || urutAwal !== '' || urutAkhir !== '') && (
                                 <button
-                                    onClick={() => { setSearchTugas(''); setStatusTugasFilter('Semua'); setTipeTugasFilter('Semua'); setUrutAwal(''); setUrutAkhir(''); }}
+                                    onClick={() => { setSearchTugas(''); setStatusTugasFilter('Semua'); setTipeTugasFilter('Semua'); setZonaTugasFilter('Semua'); setUrutAwal(''); setUrutAkhir(''); }}
                                     className="px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg font-semibold transition-colors flex items-center gap-1"
                                     title="Reset Semua Filter Tugas"
                                 >
@@ -1117,6 +1270,11 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                                     <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${p.tipePundi === 'Pundi Pribadi' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'}`}>
                                                         {p.tipePundi === 'Pundi Pribadi' ? 'Pribadi' : 'Umum'}
                                                     </span>
+                                                    {p.zona && (
+                                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 text-amber-800">
+                                                            {p.zona}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{p.donorName}</p>
                                             </div>
@@ -1209,7 +1367,7 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                                         variant="accent" 
                                                         className="text-[11px] py-1.5 px-3"
                                                     >
-                                                        <i className="fa-solid fa-hand-holding-box mr-1"></i> Jemput
+                                                        <i className="fa-solid fa-hand-holding-box mr-1"></i> Jemput Manual
                                                     </Button>
                                                 </>
                                             )}
@@ -1228,14 +1386,14 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                     <th className="px-4 py-3 text-center" style={{ width: '40px' }}>
                                         <input 
                                             type="checkbox"
-                                            checked={selectedTaskIds.size > 0 && selectedTaskIds.size === filteredTugasPundis.length}
+                                            checked={filteredTugasPundis.length > 0 && filteredTugasPundis.every(p => selectedTaskIds.has(p.id))}
                                             onChange={toggleSelectAllFiltered}
                                             className="w-4 h-4 text-wiz-green rounded cursor-pointer accent-wiz-green"
                                             title="Pilih / Batal Pilih Semua"
                                         />
                                     </th>
                                     <th className="px-4 py-3 text-center">Urut</th>
-                                    <th className="px-4 py-3">Lokasi / Usaha</th>
+                                    <th className="px-4 py-3">Lokasi / Usaha & Zona</th>
                                     <th className="px-4 py-3 text-center">Aksi Laporan</th>
                                 </tr>
                             </thead>
@@ -1264,6 +1422,11 @@ const PundiView = ({ pundis, setPundis, riwayatPundis, setRiwayatPundis, contact
                                                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.tipePundi === 'Pundi Pribadi' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'}`}>
                                                         {p.tipePundi || 'Pundi Umum'}
                                                     </span>
+                                                    {p.zona && (
+                                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                                            {p.zona}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <p className="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
                                                     <span>{p.donorName} • {p.alamat}</span>
