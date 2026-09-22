@@ -1,5 +1,5 @@
 // Komponen Manajemen Pundi WIZ (Dashboard, Menu Target Amil, Tugas Penarikan, Master Pundi, Riwayat Sedekah, Cetak)
-// Lengkap dengan Target Hasil Uang (Umum & Pribadi), Penambahan Data Baru (Umum & Pribadi), dan Target per Petugas Amil
+// Lengkap dengan Perbaikan Riwayat Sedekah dan Rincian Target Kotak & Uang di Dashboard Analitik
 
 const { useState, useEffect, useMemo, useRef } = React;
 
@@ -12,6 +12,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
     const [isQuickScanOpen, setIsQuickScanOpen] = useState(false);
     const [printQR, setPrintQR] = useState(null);
 
+    // State Edit & Kelola Riwayat Sedekah
     const [editingRiwayat, setEditingRiwayat] = useState(null);
     const [isEditRiwayatOpen, setIsEditRiwayatOpen] = useState(false);
 
@@ -125,6 +126,36 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
 
     const uniqueAmils = allAmilNames;
 
+    // Helper Buka & Simpan Edit Riwayat Sedekah (Solusi Error Tab Riwayat Sedekah)
+    const handleOpenEditRiwayat = (row) => {
+        setEditingRiwayat(row);
+        setIsEditRiwayatOpen(true);
+    };
+
+    const saveEditRiwayat = (formData) => {
+        const updated = (riwayatPundis || []).map(r => {
+            if (String(r.id) === String(editingRiwayat?.id)) {
+                return {
+                    ...r,
+                    ...formData,
+                    amount: Number(formData.amount || 0),
+                    receiptUrl: formData.receiptUrl || r.receiptUrl || ''
+                };
+            }
+            return r;
+        });
+        setRiwayatPundis(updated);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', updated);
+        setIsEditRiwayatOpen(false);
+        setEditingRiwayat(null);
+    };
+
+    const deleteRiwayat = (row) => {
+        const updated = (riwayatPundis || []).filter(r => String(r.id) !== String(row.id));
+        setRiwayatPundis(updated);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', updated);
+    };
+
     // Helper Deteksi GPS
     const handleGetCurrentLocationGPS = () => {
         if (!navigator.geolocation) {
@@ -220,140 +251,6 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         </div>
     );
 
-    // ==========================================
-    // LOGIKA PERHITUNGAN CAPAIAN TARGET REAL-TIME
-    // ==========================================
-    const evaluatedTargets = useMemo(() => {
-        return (targetsList || []).map(tgt => {
-            const targetAmil = tgt.amilName || 'Semua Amil';
-            const isAllAmil = targetAmil === 'Semua Amil';
-
-            // Filter riwayat penerimaan uang sesuai amil & periode
-            const matchedRiwayat = (riwayatPundis || []).filter(r => {
-                if (r.status !== 'Berhasil') return false;
-                if (!isAllAmil && r.amilName !== targetAmil) return false;
-
-                const d = new Date(r.date);
-                if (isNaN(d.getTime())) return false;
-
-                const matchYear = d.getFullYear() === Number(tgt.tahun);
-                const matchMonth = tgt.bulan === 'Semua' ? true : d.getMonth() === Number(tgt.bulan);
-                return matchYear && matchMonth;
-            });
-
-            // 1. Capaian Hasil Uang (Pundi Umum vs Pundi Pribadi)
-            let realisasiUangUmum = 0;
-            let realisasiUangPribadi = 0;
-
-            matchedRiwayat.forEach(r => {
-                const matchedPundi = (pundis || []).find(p => String(p.id) === String(r.pundiId) || String(p.noUrut) === String(r.noUrut));
-                const tipe = (matchedPundi && matchedPundi.tipePundi) || r.tipePundi || 'Pundi Umum';
-                const amt = Number(r.amount || 0);
-                if (tipe === 'Pundi Pribadi') realisasiUangPribadi += amt;
-                else realisasiUangUmum += amt;
-            });
-
-            const totalTargetUang = Number(tgt.targetUangUmum || 0) + Number(tgt.targetUangPribadi || 0);
-            const totalRealisasiUang = realisasiUangUmum + realisasiUangPribadi;
-            const percentUangUmum = Number(tgt.targetUangUmum) > 0 ? Math.min(Math.round((realisasiUangUmum / tgt.targetUangUmum) * 100), 100) : 0;
-            const percentUangPribadi = Number(tgt.targetUangPribadi) > 0 ? Math.min(Math.round((realisasiUangPribadi / tgt.targetUangPribadi) * 100), 100) : 0;
-            const percentTotalUang = totalTargetUang > 0 ? Math.min(Math.round((totalRealisasiUang / totalTargetUang) * 100), 100) : 0;
-
-            // 2. Capaian Penambahan Data Kotak Baru (Pundi Umum vs Pundi Pribadi)
-            const matchedPundiBaru = (pundis || []).filter(p => {
-                if (!p.createdAt) return false;
-                const creator = p.createdBy || (contacts || []).find(c => c.name === p.donorName)?.createdBy;
-                if (!isAllAmil && creator !== targetAmil) return false;
-
-                const d = new Date(p.createdAt);
-                if (isNaN(d.getTime())) return false;
-
-                const matchYear = d.getFullYear() === Number(tgt.tahun);
-                const matchMonth = tgt.bulan === 'Semua' ? true : d.getMonth() === Number(tgt.bulan);
-                return matchYear && matchMonth;
-            });
-
-            const realisasiKotakUmum = matchedPundiBaru.filter(p => (p.tipePundi || 'Pundi Umum') === 'Pundi Umum').length;
-            const realisasiKotakPribadi = matchedPundiBaru.filter(p => p.tipePundi === 'Pundi Pribadi').length;
-
-            const totalTargetKotak = Number(tgt.targetKotakUmum || 0) + Number(tgt.targetKotakPribadi || 0);
-            const totalRealisasiKotak = realisasiKotakUmum + realisasiKotakPribadi;
-            const percentKotakUmum = Number(tgt.targetKotakUmum) > 0 ? Math.min(Math.round((realisasiKotakUmum / tgt.targetKotakUmum) * 100), 100) : 0;
-            const percentKotakPribadi = Number(tgt.targetKotakPribadi) > 0 ? Math.min(Math.round((realisasiKotakPribadi / tgt.targetKotakPribadi) * 100), 100) : 0;
-            const percentTotalKotak = totalTargetKotak > 0 ? Math.min(Math.round((totalRealisasiKotak / totalTargetKotak) * 100), 100) : 0;
-
-            return {
-                ...tgt,
-                realisasiUangUmum,
-                realisasiUangPribadi,
-                totalTargetUang,
-                totalRealisasiUang,
-                percentUangUmum,
-                percentUangPribadi,
-                percentTotalUang,
-                realisasiKotakUmum,
-                realisasiKotakPribadi,
-                totalTargetKotak,
-                totalRealisasiKotak,
-                percentKotakUmum,
-                percentKotakPribadi,
-                percentTotalKotak
-            };
-        });
-    }, [targetsList, riwayatPundis, pundis, contacts]);
-
-    // Filter daftar target sesuai tahun & bulan yang dipilih
-    const filteredEvaluatedTargets = useMemo(() => {
-        return evaluatedTargets.filter(t => {
-            const matchYear = Number(t.tahun) === Number(targetFilterYear);
-            const matchMonth = targetFilterMonth === 'Semua' ? true : (t.bulan === 'Semua' || Number(t.bulan) === Number(targetFilterMonth));
-            const matchAmil = (!isAdmin && user?.name) ? (t.amilName === 'Semua Amil' || t.amilName === user.name) : true;
-            return matchYear && matchMonth && matchAmil;
-        });
-    }, [evaluatedTargets, targetFilterYear, targetFilterMonth, isAdmin, user]);
-
-    // Simpan Target (Tambah / Edit)
-    const handleSaveTarget = (e) => {
-        e.preventDefault();
-        const form = e.target;
-        const newTarget = {
-            id: editingTarget ? editingTarget.id : Date.now(),
-            amilName: form.amilName.value,
-            tahun: Number(form.tahun.value),
-            bulan: form.bulan.value === 'Semua' ? 'Semua' : Number(form.bulan.value),
-            targetUangUmum: Number(form.targetUangUmum.value.replace(/\D/g, '') || 0),
-            targetUangPribadi: Number(form.targetUangPribadi.value.replace(/\D/g, '') || 0),
-            targetKotakUmum: Number(form.targetKotakUmum.value || 0),
-            targetKotakPribadi: Number(form.targetKotakPribadi.value || 0),
-            catatan: form.catatan.value || ''
-        };
-
-        let updated = [];
-        if (editingTarget) {
-            updated = (targetsList || []).map(t => String(t.id) === String(editingTarget.id) ? newTarget : t);
-        } else {
-            updated = [...(targetsList || []), newTarget];
-        }
-
-        saveTargetsListState(updated);
-        setIsTargetModalOpen(false);
-        setEditingTarget(null);
-    };
-
-    const handleDeleteTarget = (targetId) => {
-        const updated = (targetsList || []).filter(t => String(t.id) !== String(targetId));
-        saveTargetsListState(updated);
-    };
-
-    // Total Ringkasan Target Tab
-    const sumTotalTargetUang = filteredEvaluatedTargets.reduce((s, t) => s + t.totalTargetUang, 0);
-    const sumTotalRealisasiUang = filteredEvaluatedTargets.reduce((s, t) => s + t.totalRealisasiUang, 0);
-    const sumPercentTotalUang = sumTotalTargetUang > 0 ? Math.min(Math.round((sumTotalRealisasiUang / sumTotalTargetUang) * 100), 100) : 0;
-
-    const sumTotalTargetKotak = filteredEvaluatedTargets.reduce((s, t) => s + t.totalTargetKotak, 0);
-    const sumTotalRealisasiKotak = filteredEvaluatedTargets.reduce((s, t) => s + t.totalRealisasiKotak, 0);
-    const sumPercentTotalKotak = sumTotalTargetKotak > 0 ? Math.min(Math.round((sumTotalRealisasiKotak / sumTotalTargetKotak) * 100), 100) : 0;
-
     // Filter Data Pundi per Amil
     const visiblePundis = useMemo(() => {
         const safePundis = Array.isArray(pundis) ? pundis : [];
@@ -390,7 +287,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
     
-    // Stats Dashboard
+    // STATS DASHBOARD ANALITIK TERPADU (TOTAL KOTAK UMUM, PRIBADI, TOTAL KOTAK & TARGET DANA)
     const stats = useMemo(() => {
         const totalAktif = visiblePundis.filter(p => p.status === 'Aktif').length;
         const totalUmum = visiblePundis.filter(p => p.status === 'Aktif' && (p.tipePundi || 'Pundi Umum') === 'Pundi Umum').length;
@@ -399,37 +296,216 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         const penambahanUmum = visiblePundis.filter(p => {
             if (!p.createdAt) return false;
             const d = new Date(p.createdAt);
-            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
-            return matchMonth && d.getFullYear() === dashYear && (p.tipePundi || 'Pundi Umum') === 'Pundi Umum';
+            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === Number(dashMonth);
+            return matchMonth && d.getFullYear() === Number(dashYear) && (p.tipePundi || 'Pundi Umum') === 'Pundi Umum';
         }).length;
 
         const penambahanPribadi = visiblePundis.filter(p => {
             if (!p.createdAt) return false;
             const d = new Date(p.createdAt);
-            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
-            return matchMonth && d.getFullYear() === dashYear && p.tipePundi === 'Pundi Pribadi';
+            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === Number(dashMonth);
+            return matchMonth && d.getFullYear() === Number(dashYear) && p.tipePundi === 'Pundi Pribadi';
         }).length;
 
         const ditarikBulanIni = visiblePundis.filter(p => {
             if (!p.updatedAt) return false;
             const d = new Date(p.updatedAt);
-            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
-            return p.status === 'Ditarik' && matchMonth && d.getFullYear() === dashYear;
+            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === Number(dashMonth);
+            return p.status === 'Ditarik' && matchMonth && d.getFullYear() === Number(dashYear);
         }).length;
         
         const riwayatBulanIni = visibleRiwayatPundis.filter(r => {
             const d = new Date(r.date);
-            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === dashMonth;
-            return matchMonth && d.getFullYear() === dashYear;
+            const matchMonth = dashMonth === 'Semua' ? true : d.getMonth() === Number(dashMonth);
+            return matchMonth && d.getFullYear() === Number(dashYear);
         });
         
         const berhasil = riwayatBulanIni.filter(r => r.status === 'Berhasil').length;
         const gagal = riwayatBulanIni.filter(r => r.status === 'Gagal').length;
-        const totalDanaBulanIni = riwayatBulanIni.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+        // Hitung realisasi uang pundi umum vs pundi pribadi
+        let danaUmum = 0;
+        let danaPribadi = 0;
+        riwayatBulanIni.filter(r => r.status === 'Berhasil').forEach(r => {
+            const matchedPundi = visiblePundis.find(p => String(p.id) === String(r.pundiId) || String(p.noUrut) === String(r.noUrut));
+            const tipe = (matchedPundi && matchedPundi.tipePundi) || r.tipePundi || 'Pundi Umum';
+            const amt = Number(r.amount || 0);
+            if (tipe === 'Pundi Pribadi') danaPribadi += amt;
+            else danaUmum += amt;
+        });
+
+        const totalDanaBulanIni = danaUmum + danaPribadi;
         const totalDanaKumulatif = visibleRiwayatPundis.filter(r => r.status === 'Berhasil').reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
-        return { totalAktif, totalUmum, totalPribadi, penambahanUmum, penambahanPribadi, ditarikBulanIni, berhasil, gagal, totalDanaBulanIni, totalDanaKumulatif };
-    }, [visiblePundis, visibleRiwayatPundis, dashMonth, dashYear]);
+        // Ambil target yang sesuai periode dashYear dan dashMonth dari targetsList
+        const matchedTargets = (targetsList || []).filter(t => {
+            const matchYear = Number(t.tahun) === Number(dashYear);
+            const matchMonth = dashMonth === 'Semua' ? true : (t.bulan === 'Semua' || Number(t.bulan) === Number(dashMonth));
+            const isAllAmil = t.amilName === 'Semua Amil';
+            const matchAmil = (isAdmin && effectiveAmil === 'Semua') ? true : (t.amilName === effectiveAmil || isAllAmil);
+            return matchYear && matchMonth && matchAmil;
+        });
+
+        let targetUangUmum = 0;
+        let targetUangPribadi = 0;
+        let targetKotakUmum = 0;
+        let targetKotakPribadi = 0;
+
+        matchedTargets.forEach(t => {
+            const factor = (t.bulan === 'Semua' && dashMonth !== 'Semua') ? (1 / 12) : 1;
+            targetUangUmum += Math.round(Number(t.targetUangUmum || 0) * factor);
+            targetUangPribadi += Math.round(Number(t.targetUangPribadi || 0) * factor);
+            targetKotakUmum += Math.round(Number(t.targetKotakUmum || 0) * factor);
+            targetKotakPribadi += Math.round(Number(t.targetKotakPribadi || 0) * factor);
+        });
+
+        // Fallback default jika belum ada target terkonfigurasi
+        if (targetUangUmum === 0 && targetUangPribadi === 0) {
+            const factor = dashMonth === 'Semua' ? 1 : (1 / 12);
+            targetUangUmum = Math.round(300000000 * factor);
+            targetUangPribadi = Math.round(120000000 * factor);
+            targetKotakUmum = Math.round(120 * factor);
+            targetKotakPribadi = Math.round(60 * factor);
+        }
+
+        const totalTargetUang = targetUangUmum + targetUangPribadi;
+        const totalTargetKotak = targetKotakUmum + targetKotakPribadi;
+
+        const percentUangUmum = targetUangUmum > 0 ? Math.min(Math.round((danaUmum / targetUangUmum) * 100), 100) : 0;
+        const percentUangPribadi = targetUangPribadi > 0 ? Math.min(Math.round((danaPribadi / targetUangPribadi) * 100), 100) : 0;
+        const percentTotalUang = totalTargetUang > 0 ? Math.min(Math.round((totalDanaBulanIni / totalTargetUang) * 100), 100) : 0;
+
+        const percentKotakUmum = targetKotakUmum > 0 ? Math.min(Math.round((totalUmum / targetKotakUmum) * 100), 100) : 0;
+        const percentKotakPribadi = targetKotakPribadi > 0 ? Math.min(Math.round((totalPribadi / targetKotakPribadi) * 100), 100) : 0;
+        const percentTotalKotak = totalTargetKotak > 0 ? Math.min(Math.round((totalAktif / totalTargetKotak) * 100), 100) : 0;
+
+        return { 
+            totalAktif, totalUmum, totalPribadi, 
+            penambahanUmum, penambahanPribadi, ditarikBulanIni, 
+            berhasil, gagal, 
+            danaUmum, danaPribadi, totalDanaBulanIni, totalDanaKumulatif,
+            targetUangUmum, targetUangPribadi, totalTargetUang,
+            targetKotakUmum, targetKotakPribadi, totalTargetKotak,
+            percentUangUmum, percentUangPribadi, percentTotalUang,
+            percentKotakUmum, percentKotakPribadi, percentTotalKotak
+        };
+    }, [visiblePundis, visibleRiwayatPundis, dashMonth, dashYear, targetsList, isAdmin, effectiveAmil]);
+
+    // Evaluasi Rincian Target untuk Sub Tab Target
+    const evaluatedTargets = useMemo(() => {
+        return (targetsList || []).map(tgt => {
+            const targetAmil = tgt.amilName || 'Semua Amil';
+            const isAllAmil = targetAmil === 'Semua Amil';
+
+            const matchedRiwayat = (riwayatPundis || []).filter(r => {
+                if (r.status !== 'Berhasil') return false;
+                if (!isAllAmil && r.amilName !== targetAmil) return false;
+
+                const d = new Date(r.date);
+                if (isNaN(d.getTime())) return false;
+
+                const matchYear = d.getFullYear() === Number(tgt.tahun);
+                const matchMonth = tgt.bulan === 'Semua' ? true : d.getMonth() === Number(tgt.bulan);
+                return matchYear && matchMonth;
+            });
+
+            let realisasiUangUmum = 0;
+            let realisasiUangPribadi = 0;
+
+            matchedRiwayat.forEach(r => {
+                const matchedPundi = (pundis || []).find(p => String(p.id) === String(r.pundiId) || String(p.noUrut) === String(r.noUrut));
+                const tipe = (matchedPundi && matchedPundi.tipePundi) || r.tipePundi || 'Pundi Umum';
+                const amt = Number(r.amount || 0);
+                if (tipe === 'Pundi Pribadi') realisasiUangPribadi += amt;
+                else realisasiUangUmum += amt;
+            });
+
+            const totalTargetUang = Number(tgt.targetUangUmum || 0) + Number(tgt.targetUangPribadi || 0);
+            const totalRealisasiUang = realisasiUangUmum + realisasiUangPribadi;
+            const percentUangUmum = Number(tgt.targetUangUmum) > 0 ? Math.min(Math.round((realisasiUangUmum / tgt.targetUangUmum) * 100), 100) : 0;
+            const percentUangPribadi = Number(tgt.targetUangPribadi) > 0 ? Math.min(Math.round((realisasiUangPribadi / tgt.targetUangPribadi) * 100), 100) : 0;
+            const percentTotalUang = totalTargetUang > 0 ? Math.min(Math.round((totalRealisasiUang / totalTargetUang) * 100), 100) : 0;
+
+            const matchedPundiBaru = (pundis || []).filter(p => {
+                if (!p.createdAt) return false;
+                const creator = p.createdBy || (contacts || []).find(c => c.name === p.donorName)?.createdBy;
+                if (!isAllAmil && creator !== targetAmil) return false;
+
+                const d = new Date(p.createdAt);
+                if (isNaN(d.getTime())) return false;
+
+                const matchYear = d.getFullYear() === Number(tgt.tahun);
+                const matchMonth = tgt.bulan === 'Semua' ? true : d.getMonth() === Number(tgt.bulan);
+                return matchYear && matchMonth;
+            });
+
+            const realisasiKotakUmum = matchedPundiBaru.filter(p => (p.tipePundi || 'Pundi Umum') === 'Pundi Umum').length;
+            const realisasiKotakPribadi = matchedPundiBaru.filter(p => p.tipePundi === 'Pundi Pribadi').length;
+
+            const totalTargetKotak = Number(tgt.targetKotakUmum || 0) + Number(tgt.targetKotakPribadi || 0);
+            const totalRealisasiKotak = realisasiKotakUmum + realisasiKotakPribadi;
+            const percentKotakUmum = Number(tgt.targetKotakUmum) > 0 ? Math.min(Math.round((realisasiKotakUmum / tgt.targetKotakUmum) * 100), 100) : 0;
+            const percentKotakPribadi = Number(tgt.targetKotakPribadi) > 0 ? Math.min(Math.round((realisasiKotakPribadi / tgt.targetKotakPribadi) * 100), 100) : 0;
+            const percentTotalKotak = totalTargetKotak > 0 ? Math.min(Math.round((totalRealisasiKotak / totalTargetKotak) * 100), 100) : 0;
+
+            return {
+                ...tgt,
+                realisasiUangUmum, realisasiUangPribadi, totalTargetUang, totalRealisasiUang,
+                percentUangUmum, percentUangPribadi, percentTotalUang,
+                realisasiKotakUmum, realisasiKotakPribadi, totalTargetKotak, totalRealisasiKotak,
+                percentKotakUmum, percentKotakPribadi, percentTotalKotak
+            };
+        });
+    }, [targetsList, riwayatPundis, pundis, contacts]);
+
+    const filteredEvaluatedTargets = useMemo(() => {
+        return evaluatedTargets.filter(t => {
+            const matchYear = Number(t.tahun) === Number(targetFilterYear);
+            const matchMonth = targetFilterMonth === 'Semua' ? true : (t.bulan === 'Semua' || Number(t.bulan) === Number(targetFilterMonth));
+            const matchAmil = (!isAdmin && user?.name) ? (t.amilName === 'Semua Amil' || t.amilName === user.name) : true;
+            return matchYear && matchMonth && matchAmil;
+        });
+    }, [evaluatedTargets, targetFilterYear, targetFilterMonth, isAdmin, user]);
+
+    const handleSaveTarget = (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const newTarget = {
+            id: editingTarget ? editingTarget.id : Date.now(),
+            amilName: form.amilName.value,
+            tahun: Number(form.tahun.value),
+            bulan: form.bulan.value === 'Semua' ? 'Semua' : Number(form.bulan.value),
+            targetUangUmum: Number(form.targetUangUmum.value.replace(/\D/g, '') || 0),
+            targetUangPribadi: Number(form.targetUangPribadi.value.replace(/\D/g, '') || 0),
+            targetKotakUmum: Number(form.targetKotakUmum.value || 0),
+            targetKotakPribadi: Number(form.targetKotakPribadi.value || 0),
+            catatan: form.catatan.value || ''
+        };
+
+        let updated = [];
+        if (editingTarget) {
+            updated = (targetsList || []).map(t => String(t.id) === String(editingTarget.id) ? newTarget : t);
+        } else {
+            updated = [...(targetsList || []), newTarget];
+        }
+
+        saveTargetsListState(updated);
+        setIsTargetModalOpen(false);
+        setEditingTarget(null);
+    };
+
+    const handleDeleteTarget = (targetId) => {
+        const updated = (targetsList || []).filter(t => String(t.id) !== String(targetId));
+        saveTargetsListState(updated);
+    };
+
+    const sumTotalTargetUang = filteredEvaluatedTargets.reduce((s, t) => s + t.totalTargetUang, 0);
+    const sumTotalRealisasiUang = filteredEvaluatedTargets.reduce((s, t) => s + t.totalRealisasiUang, 0);
+    const sumPercentTotalUang = sumTotalTargetUang > 0 ? Math.min(Math.round((sumTotalRealisasiUang / sumTotalTargetUang) * 100), 100) : 0;
+
+    const sumTotalTargetKotak = filteredEvaluatedTargets.reduce((s, t) => s + t.totalTargetKotak, 0);
+    const sumTotalRealisasiKotak = filteredEvaluatedTargets.reduce((s, t) => s + t.totalRealisasiKotak, 0);
+    const sumPercentTotalKotak = sumTotalTargetKotak > 0 ? Math.min(Math.round((sumTotalRealisasiKotak / sumTotalTargetKotak) * 100), 100) : 0;
 
     const activePundisSorted = [...visiblePundis].filter(p => p.status === 'Aktif').sort((a, b) => Number(a.noUrut) - Number(b.noUrut));
 
@@ -509,8 +585,8 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
     };
 
     const filteredRiwayatPundis = useMemo(() => {
-        return visibleRiwayatPundis.filter(r => {
-            const term = searchRiwayat.toLowerCase().trim();
+        return (visibleRiwayatPundis || []).filter(r => {
+            const term = (searchRiwayat || '').toLowerCase().trim();
             const matchSearch = !term ||
                 String(r.noUrut || '').toLowerCase().includes(term) ||
                 String(r.donorName || '').toLowerCase().includes(term) ||
@@ -831,13 +907,13 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         if (!isEdit) {
             newData.id = Date.now();
             newData.createdAt = now;
-            newData.createdBy = user.name;
+            newData.createdBy = user?.name || 'Amil';
         }
         const updatedList = isEdit 
             ? pundis.map(p => String(p.id) === String(newData.id) ? newData : p) 
             : [...pundis, newData];
         setPundis(updatedList);
-        syncDataToSheet('Pundi', updatedList);
+        if (typeof syncDataToSheet === 'function') syncDataToSheet('Pundi', updatedList);
     };
 
     const deletePundi = (row) => {
@@ -1009,7 +1085,7 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                 </div>
             </div>
 
-            {/* TAB NAVIGASI UTAMA (TAMBAH MENU TARGET) */}
+            {/* TAB NAVIGASI UTAMA */}
             <div className="flex overflow-x-auto gap-2 bg-white dark:bg-gray-800 p-1.5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm w-full hide-scrollbar">
                 {[
                     { id: 'dashboard', label: 'Dashboard Analitik', icon: 'fa-chart-pie' },
@@ -1029,6 +1105,263 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                     </button>
                 ))}
             </div>
+
+            {/* ========================================================================= */}
+            {/* SUB TAB: DASHBOARD ANALITIK PUNDI DENGAN RINCIAN TARGET LENGKAP          */}
+            {/* ========================================================================= */}
+            {activeSubTab === 'dashboard' && (
+                <div className="space-y-6 animate-in">
+                    {/* Filter Periode Dashboard */}
+                    <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                            <h3 className="font-bold text-gray-800 dark:text-gray-100 text-sm"><i className="fa-solid fa-filter text-wiz-green mr-1.5"></i> Filter Periode Analitik Dashboard</h3>
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Pilih bulan dan tahun untuk menyesuaikan data capaian kotak pundi dan hasil penarikan.</p>
+                        </div>
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                            <select 
+                                value={dashMonth} 
+                                onChange={(e) => setDashMonth(e.target.value === 'Semua' ? 'Semua' : Number(e.target.value))} 
+                                className="flex-1 sm:flex-none px-3 py-2 bg-gray-50 dark:bg-gray-700/70 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer focus:ring-2 focus:ring-wiz-green"
+                            >
+                                <option value="Semua" className="dark:bg-gray-800">Semua Bulan</option>
+                                {monthNames.map((m, idx) => <option key={idx} value={idx} className="dark:bg-gray-800">{m}</option>)}
+                            </select>
+                            <select 
+                                value={dashYear} 
+                                onChange={(e) => setDashYear(Number(e.target.value))} 
+                                className="flex-1 sm:flex-none px-3 py-2 bg-gray-50 dark:bg-gray-700/70 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer focus:ring-2 focus:ring-wiz-green"
+                            >
+                                {yearOptions.map(y => <option key={y} value={y} className="dark:bg-gray-800">{y}</option>)}
+                            </select>
+                        </div>
+                    </div>
+                    
+                    {/* Banner Utama Target Capaian Hasil Dana Periode */}
+                    <div className="p-6 bg-gradient-to-r from-wiz-green_dark via-wiz-green to-teal-700 rounded-3xl text-white shadow-xl relative overflow-hidden">
+                        <div className="absolute -right-6 -bottom-6 text-9xl text-white/10 pointer-events-none">
+                            <i className="fa-solid fa-coins"></i>
+                        </div>
+                        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black uppercase tracking-wider mb-2">
+                                    <i className="fa-solid fa-bullseye"></i> Capaian Hasil Sedekah Pundi ({dashMonth === 'Semua' ? `Semua Bulan ${dashYear}` : `${monthNames[dashMonth]} ${dashYear}`})
+                                </div>
+                                <h3 className="text-3xl sm:text-4xl font-black">{typeof formatRp === 'function' ? formatRp(stats.totalDanaBulanIni) : stats.totalDanaBulanIni}</h3>
+                                <p className="text-white/80 text-xs sm:text-sm mt-1">
+                                    Target Rencana: <b>{typeof formatRp === 'function' ? formatRp(stats.totalTargetUang) : stats.totalTargetUang}</b> (Akumulasi Pundi Umum & Pribadi)
+                                </p>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                                <div className="bg-white/15 backdrop-blur-md px-5 py-3 rounded-2xl border border-white/20 text-right">
+                                    <p className="text-[10px] uppercase font-bold text-white/75">Ketercapaian</p>
+                                    <p className="text-2xl sm:text-3xl font-black text-amber-300">{stats.percentTotalUang}%</p>
+                                </div>
+                                <button 
+                                    onClick={() => setActiveSubTab('target')}
+                                    className="px-3.5 py-2.5 bg-white text-wiz-green_dark font-bold text-xs rounded-xl shadow hover:bg-gray-100 transition-all shrink-0 flex items-center gap-1.5"
+                                >
+                                    <i className="fa-solid fa-gear"></i> Atur Target
+                                </button>
+                            </div>
+                        </div>
+                        <div className="w-full bg-black/20 rounded-full h-2.5 mt-5 relative z-10 overflow-hidden">
+                            <div className="bg-amber-300 h-2.5 rounded-full transition-all duration-1000 shadow-md" style={{ width: `${stats.percentTotalUang}%` }}></div>
+                        </div>
+                    </div>
+
+                    {/* SECTION 1: TOTAL PUNDI (KOTAK AKTIF & TARGET KOTAK) */}
+                    <div>
+                        <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-200 uppercase tracking-wider flex items-center gap-2">
+                                <i className="fa-solid fa-boxes-stacked text-wiz-green"></i> 1. Kuantitas Kotak Pundi & Target Distribusi
+                            </h4>
+                            <span className="text-[11px] text-gray-400">Status kotak terdaftar di lapangan</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+                            {/* Card 1: Total Seluruh Pundi */}
+                            <div className="bg-gradient-to-br from-wiz-green to-wiz-green_dark p-5 sm:p-6 rounded-3xl text-white shadow-md relative overflow-hidden flex flex-col justify-between">
+                                <i className="fa-solid fa-box-open absolute -right-3 -bottom-3 text-7xl opacity-15 pointer-events-none"></i>
+                                <div>
+                                    <div className="flex justify-between items-start">
+                                        <p className="text-[11px] font-bold opacity-80 uppercase tracking-wider">Total Pundi (Kolektif)</p>
+                                        <span className="px-2 py-0.5 rounded-full bg-white/20 text-[10px] font-black">{stats.percentTotalKotak}%</span>
+                                    </div>
+                                    <h3 className="text-3xl sm:text-4xl font-black mt-1">{stats.totalAktif} <span className="text-sm font-normal opacity-80">Kotak</span></h3>
+                                    <p className="text-xs text-white/80 mt-0.5">Target Kotak: <b>{stats.totalTargetKotak} Kotak</b></p>
+                                </div>
+                                <div className="mt-4 pt-3 border-t border-white/20">
+                                    <div className="w-full bg-black/20 rounded-full h-1.5 overflow-hidden">
+                                        <div className="bg-white h-1.5 rounded-full" style={{ width: `${stats.percentTotalKotak}%` }}></div>
+                                    </div>
+                                    <p className="text-[10px] text-white/70 mt-1">Gabungan pundi toko & rumah tangga</p>
+                                </div>
+                            </div>
+
+                            {/* Card 2: Pundi Umum */}
+                            <div className="bg-white dark:bg-gray-800 p-5 sm:p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+                                <div>
+                                    <div className="flex justify-between items-start">
+                                        <span className="px-2.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 text-[10px] font-black uppercase border border-blue-200 dark:border-blue-800">
+                                            <i className="fa-solid fa-store mr-1"></i> Pundi Umum (Toko)
+                                        </span>
+                                        <span className="text-xs font-black text-blue-600">{stats.percentKotakUmum}%</span>
+                                    </div>
+                                    <h3 className="text-3xl sm:text-4xl font-black text-gray-800 dark:text-gray-100 mt-2">{stats.totalUmum} <span className="text-sm font-normal text-gray-400">Kotak</span></h3>
+                                    <p className="text-xs text-gray-400 mt-0.5">Target: <b>{stats.targetKotakUmum} Kotak</b></p>
+                                </div>
+                                <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/60">
+                                    <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                                        <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${stats.percentKotakUmum}%` }}></div>
+                                    </div>
+                                    <p className="text-[10px] text-gray-400 mt-1">Titik usaha, resto & pertokoan</p>
+                                </div>
+                            </div>
+
+                            {/* Card 3: Pundi Pribadi */}
+                            <div className="bg-white dark:bg-gray-800 p-5 sm:p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+                                <div>
+                                    <div className="flex justify-between items-start">
+                                        <span className="px-2.5 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-300 text-[10px] font-black uppercase border border-purple-200 dark:border-purple-800">
+                                            <i className="fa-solid fa-house-user mr-1"></i> Pundi Pribadi (Rumah)
+                                        </span>
+                                        <span className="text-xs font-black text-purple-600">{stats.percentKotakPribadi}%</span>
+                                    </div>
+                                    <h3 className="text-3xl sm:text-4xl font-black text-gray-800 dark:text-gray-100 mt-2">{stats.totalPribadi} <span className="text-sm font-normal text-gray-400">Kotak</span></h3>
+                                    <p className="text-xs text-gray-400 mt-0.5">Target: <b>{stats.targetKotakPribadi} Kotak</b></p>
+                                </div>
+                                <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/60">
+                                    <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                                        <div className="bg-purple-500 h-1.5 rounded-full" style={{ width: `${stats.percentKotakPribadi}%` }}></div>
+                                    </div>
+                                    <p className="text-[10px] text-gray-400 mt-1">Titik kediaman donatur keluarga</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* SECTION 2: HASIL PEROLEHAN DANA & TARGET UANG (UMUM & PRIBADI) */}
+                    <div>
+                        <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-200 uppercase tracking-wider flex items-center gap-2">
+                                <i className="fa-solid fa-hand-holding-dollar text-wiz-orange"></i> 2. Rincian Capaian Hasil Uang (Rp) & Target
+                            </h4>
+                            <span className="text-[11px] text-gray-400">Realisasi penarikan terhitung otomatis</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                            {/* Rincian Uang Pundi Umum */}
+                            <div className="bg-white dark:bg-gray-800 p-5 sm:p-6 rounded-3xl border border-blue-100 dark:border-blue-900/50 shadow-sm space-y-4">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 flex items-center justify-center font-bold text-sm">
+                                                <i className="fa-solid fa-store"></i>
+                                            </div>
+                                            <div>
+                                                <h5 className="font-bold text-sm text-gray-800 dark:text-gray-100">Hasil Uang Pundi Umum</h5>
+                                                <p className="text-[11px] text-gray-400">Periode: {dashMonth === 'Semua' ? `Tahun ${dashYear}` : `${monthNames[dashMonth]} ${dashYear}`}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <span className="text-sm font-black text-blue-600 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-800">
+                                        {stats.percentUangUmum}%
+                                    </span>
+                                </div>
+
+                                <div className="p-4 bg-blue-50/40 dark:bg-blue-950/20 rounded-2xl border border-blue-100 dark:border-blue-900/40 space-y-2">
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="text-gray-500 font-semibold">Terkumpul:</span>
+                                        <span className="font-black text-base text-blue-600 dark:text-blue-400">{typeof formatRp === 'function' ? formatRp(stats.danaUmum) : stats.danaUmum}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="text-gray-400">Target Uang:</span>
+                                        <span className="font-bold text-gray-700 dark:text-gray-200">{typeof formatRp === 'function' ? formatRp(stats.targetUangUmum) : stats.targetUangUmum}</span>
+                                    </div>
+                                    <div className="w-full bg-blue-100 dark:bg-blue-900/50 rounded-full h-2 overflow-hidden mt-1">
+                                        <div className="bg-blue-600 h-2 rounded-full transition-all duration-700" style={{ width: `${stats.percentUangUmum}%` }}></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Rincian Uang Pundi Pribadi */}
+                            <div className="bg-white dark:bg-gray-800 p-5 sm:p-6 rounded-3xl border border-purple-100 dark:border-purple-900/50 shadow-sm space-y-4">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600 flex items-center justify-center font-bold text-sm">
+                                                <i className="fa-solid fa-house-user"></i>
+                                            </div>
+                                            <div>
+                                                <h5 className="font-bold text-sm text-gray-800 dark:text-gray-100">Hasil Uang Pundi Pribadi</h5>
+                                                <p className="text-[11px] text-gray-400">Periode: {dashMonth === 'Semua' ? `Tahun ${dashYear}` : `${monthNames[dashMonth]} ${dashYear}`}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <span className="text-sm font-black text-purple-600 px-2.5 py-1 bg-purple-50 dark:bg-purple-950/40 rounded-xl border border-purple-200 dark:border-purple-800">
+                                        {stats.percentUangPribadi}%
+                                    </span>
+                                </div>
+
+                                <div className="p-4 bg-purple-50/40 dark:bg-purple-950/20 rounded-2xl border border-purple-100 dark:border-purple-900/40 space-y-2">
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="text-gray-500 font-semibold">Terkumpul:</span>
+                                        <span className="font-black text-base text-purple-600 dark:text-purple-400">{typeof formatRp === 'function' ? formatRp(stats.danaPribadi) : stats.danaPribadi}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="text-gray-400">Target Uang:</span>
+                                        <span className="font-bold text-gray-700 dark:text-gray-200">{typeof formatRp === 'function' ? formatRp(stats.targetUangPribadi) : stats.targetUangPribadi}</span>
+                                    </div>
+                                    <div className="w-full bg-purple-100 dark:bg-purple-900/50 rounded-full h-2 overflow-hidden mt-1">
+                                        <div className="bg-purple-600 h-2 rounded-full transition-all duration-700" style={{ width: `${stats.percentUangPribadi}%` }}></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* SECTION 3: AKTIVITAS PENARIKAN & KOTAK BARU */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                        <div className="bg-white dark:bg-gray-800 p-5 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center">
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
+                                Rekrutmen Kotak Baru <span className="text-wiz-green capitalize font-black ml-1">({dashMonth === 'Semua' ? `Sepanjang ${dashYear}` : `${monthNames[dashMonth]} ${dashYear}`})</span>
+                            </p>
+                            <div className="space-y-3">
+                                <div className="flex justify-between items-center text-sm font-semibold">
+                                    <span className="text-blue-500 flex items-center gap-2"><i className="fa-solid fa-circle-plus"></i> Kotak Baru (Umum)</span>
+                                    <span className="text-gray-800 dark:text-gray-200 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-0.5 rounded-md border border-blue-100 dark:border-blue-800/50 font-bold">{stats.penambahanUmum} Unit</span>
+                                </div>
+                                <div className="flex justify-between items-center text-sm font-semibold">
+                                    <span className="text-purple-500 flex items-center gap-2"><i className="fa-solid fa-circle-plus"></i> Kotak Baru (Pribadi)</span>
+                                    <span className="text-gray-800 dark:text-gray-200 bg-purple-50 dark:bg-purple-900/30 px-2.5 py-0.5 rounded-md border border-purple-100 dark:border-purple-800/50 font-bold">{stats.penambahanPribadi} Unit</span>
+                                </div>
+                                <div className="flex justify-between items-center text-sm font-semibold pt-2 border-t border-gray-100 dark:border-gray-700">
+                                    <span className="text-red-500 flex items-center gap-2"><i className="fa-solid fa-arrow-right-from-bracket"></i> Kotak Ditarik (Nonaktif)</span>
+                                    <span className="text-gray-800 dark:text-gray-200 bg-red-50 dark:bg-red-900/30 px-2.5 py-0.5 rounded-md border border-red-100 dark:border-red-800/50 font-bold">{stats.ditarikBulanIni} Unit</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-gray-800 p-5 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center">
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
+                                Hasil Kunjungan Penarikan <span className="text-wiz-orange capitalize font-black ml-1">({dashMonth === 'Semua' ? `Sepanjang ${dashYear}` : `${monthNames[dashMonth]} ${dashYear}`})</span>
+                            </p>
+                            <div className="grid grid-cols-2 gap-3 mb-2">
+                                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-100 dark:border-emerald-900/40 text-center">
+                                    <span className="text-[10px] font-bold text-wiz-green uppercase">Penarikan Berhasil</span>
+                                    <p className="text-2xl font-black text-wiz-green dark:text-emerald-400 mt-1">{stats.berhasil}</p>
+                                </div>
+                                <div className="p-3 bg-red-50 dark:bg-red-950/30 rounded-2xl border border-red-100 dark:border-red-900/40 text-center">
+                                    <span className="text-[10px] font-bold text-red-500 uppercase">Gagal / Kosong</span>
+                                    <p className="text-2xl font-black text-red-500 dark:text-red-400 mt-1">{stats.gagal}</p>
+                                </div>
+                            </div>
+                            <p className="text-[10px] text-gray-400 text-center mt-1">Total Dana Terhimpun: <b className="text-wiz-orange">{typeof formatRp === 'function' ? formatRp(stats.totalDanaBulanIni) : stats.totalDanaBulanIni}</b></p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ========================================================================= */}
             {/* SUB TAB: MENU TARGET & AMIL (HASIL UANG, KOTAK BARU, TARGET AMIL SIAPA)   */}
@@ -1293,7 +1626,6 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                         title={editingTarget ? "Edit Target Pundi Amil" : "Tetapkan Target Pundi Amil Baru"}
                     >
                         <form onSubmit={handleSaveTarget} className="space-y-4">
-                            {/* Pilihan Amil & Periode */}
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 <div>
                                     <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1 uppercase">Target Untuk Amil</label>
@@ -1422,116 +1754,6 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                 </div>
             )}
 
-            {/* DASHBOARD TAB */}
-            {activeSubTab === 'dashboard' && (
-                <div className="space-y-6 animate-in">
-                    <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                        <div>
-                            <h3 className="font-bold text-gray-800 dark:text-gray-100 text-sm"><i className="fa-solid fa-filter text-wiz-green mr-1.5"></i> Filter Periode Analitik</h3>
-                            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Pilih bulan dan tahun untuk menyesuaikan data aktivitas dan penarikan.</p>
-                        </div>
-                        <div className="flex items-center gap-2 w-full sm:w-auto">
-                            <select 
-                                value={dashMonth} 
-                                onChange={(e) => setDashMonth(e.target.value === 'Semua' ? 'Semua' : Number(e.target.value))} 
-                                className="flex-1 sm:flex-none px-3 py-2 bg-gray-50 dark:bg-gray-700/70 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer focus:ring-2 focus:ring-wiz-green"
-                            >
-                                <option value="Semua" className="dark:bg-gray-800">Semua Bulan</option>
-                                {monthNames.map((m, idx) => <option key={idx} value={idx} className="dark:bg-gray-800">{m}</option>)}
-                            </select>
-                            <select 
-                                value={dashYear} 
-                                onChange={(e) => setDashYear(Number(e.target.value))} 
-                                className="flex-1 sm:flex-none px-3 py-2 bg-gray-50 dark:bg-gray-700/70 border border-gray-200 dark:border-gray-600 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-200 outline-none cursor-pointer focus:ring-2 focus:ring-wiz-green"
-                            >
-                                {yearOptions.map(y => <option key={y} value={y} className="dark:bg-gray-800">{y}</option>)}
-                            </select>
-                        </div>
-                    </div>
-                    
-                    {activePundiCampaign && (
-                        <div className="p-6 bg-gradient-to-r from-wiz-orange_dark via-wiz-orange to-amber-500 rounded-3xl text-white shadow-xl shadow-wiz-orange/20 relative overflow-hidden">
-                            <div className="absolute -right-6 -bottom-6 text-9xl text-white/10 pointer-events-none">
-                                <i className="fa-solid fa-bullseye"></i>
-                            </div>
-                            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                                <div>
-                                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black uppercase tracking-wider mb-2">
-                                        <i className="fa-solid fa-arrows-rotate animate-spin"></i> Target Campaign Pundi Terhubung
-                                    </div>
-                                    <h3 className="text-2xl font-black">{activePundiCampaign.name}</h3>
-                                    <p className="text-white/80 text-xs mt-1">Batas Waktu: {typeof formatDate === 'function' ? formatDate(activePundiCampaign.deadline) : activePundiCampaign.deadline}</p>
-                                </div>
-                                <div className="bg-white/15 backdrop-blur-md px-5 py-3 rounded-2xl border border-white/20 flex items-center gap-6">
-                                    <div>
-                                        <p className="text-[10px] uppercase font-bold text-white/75">Target Dana</p>
-                                        <p className="text-lg font-black">{typeof formatRp === 'function' ? formatRp(activePundiCampaign.target) : activePundiCampaign.target}</p>
-                                    </div>
-                                    <div className="h-8 w-px bg-white/20"></div>
-                                    <div>
-                                        <p className="text-[10px] uppercase font-bold text-white/75">Terkumpul</p>
-                                        <p className="text-lg font-black text-white">{typeof formatRp === 'function' ? formatRp(stats.totalDanaKumulatif) : stats.totalDanaKumulatif}</p>
-                                    </div>
-                                    <div className="bg-white text-wiz-orange_dark font-black px-3 py-1.5 rounded-xl text-sm shadow">
-                                        {activePundiCampaign.target > 0 ? Math.min(Math.round((stats.totalDanaKumulatif / activePundiCampaign.target) * 100), 100) : 0}%
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="w-full bg-black/20 rounded-full h-2 mt-5 relative z-10 overflow-hidden">
-                                <div 
-                                    className="bg-white h-2 rounded-full transition-all duration-1000 shadow-md" 
-                                    style={{ width: `${activePundiCampaign.target > 0 ? Math.min(Math.round((stats.totalDanaKumulatif / activePundiCampaign.target) * 100), 100) : 0}%` }}
-                                ></div>
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                        <div className="bg-gradient-to-br from-wiz-green to-wiz-green_dark p-6 rounded-2xl text-white shadow-lg relative overflow-hidden">
-                            <i className="fa-solid fa-box-open absolute -right-4 -bottom-4 text-7xl opacity-10"></i>
-                            <p className="text-sm font-semibold opacity-80 uppercase tracking-wide mb-1">Total Pundi Aktif (Akumulasi)</p>
-                            <h3 className="text-4xl font-black">{stats.totalAktif} <span className="text-base font-normal opacity-75">Kotak</span></h3>
-                            <div className="flex items-center gap-3 mt-3 pt-3 border-t border-white/20 text-xs">
-                                <span className="bg-white/20 px-2 py-0.5 rounded-md font-semibold"><i className="fa-solid fa-store mr-1"></i> {stats.totalUmum} Umum</span>
-                                <span className="bg-white/20 px-2 py-0.5 rounded-md font-semibold"><i className="fa-solid fa-house-user mr-1"></i> {stats.totalPribadi} Pribadi</span>
-                            </div>
-                        </div>
-
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center">
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-                                Aktivitas Kotak <span className="text-wiz-green capitalize font-black ml-1">({dashMonth === 'Semua' ? `Sepanjang ${dashYear}` : `${monthNames[dashMonth]} ${dashYear}`})</span>
-                            </p>
-                            <div className="space-y-3.5">
-                                <div className="flex justify-between items-center text-sm font-semibold">
-                                    <span className="text-blue-500 flex items-center gap-2"><i className="fa-solid fa-circle-plus"></i> Tambah (Umum)</span>
-                                    <span className="text-gray-800 dark:text-gray-200 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-md border border-blue-100 dark:border-blue-800/50">{stats.penambahanUmum} Kotak</span>
-                                </div>
-                                <div className="flex justify-between items-center text-sm font-semibold">
-                                    <span className="text-purple-500 flex items-center gap-2"><i className="fa-solid fa-circle-plus"></i> Tambah (Pribadi)</span>
-                                    <span className="text-gray-800 dark:text-gray-200 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-md border border-purple-100 dark:border-purple-800/50">{stats.penambahanPribadi} Kotak</span>
-                                </div>
-                                <div className="flex justify-between items-center text-sm font-semibold pt-2 border-t border-gray-100 dark:border-gray-700">
-                                    <span className="text-red-500 flex items-center gap-2"><i className="fa-solid fa-arrow-right-from-bracket"></i> Pundi Ditarik</span>
-                                    <span className="text-gray-800 dark:text-gray-200 bg-red-50 dark:bg-red-900/30 px-2 py-0.5 rounded-md border border-red-100 dark:border-red-800/50">{stats.ditarikBulanIni} Kotak</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center">
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                                Hasil Penarikan <span className="text-wiz-orange capitalize font-black ml-1">({dashMonth === 'Semua' ? `Sepanjang ${dashYear}` : `${monthNames[dashMonth]} ${dashYear}`})</span>
-                            </p>
-                            <div className="flex justify-between items-center mb-2">
-                                <span className="text-sm font-semibold text-gray-600 dark:text-gray-300">Berhasil: <span className="text-wiz-green font-bold bg-wiz-green/10 px-1.5 py-0.5 rounded">{stats.berhasil}</span></span>
-                                <span className="text-sm font-semibold text-gray-600 dark:text-gray-300">Gagal: <span className="text-red-500 font-bold bg-red-50 px-1.5 py-0.5 rounded">{stats.gagal}</span></span>
-                            </div>
-                            <p className="text-[10px] font-bold text-gray-400 uppercase mt-2">Nominal Terkumpul</p>
-                            <p className="text-2xl font-black text-wiz-orange">{typeof formatRp === 'function' ? formatRp(stats.totalDanaBulanIni) : stats.totalDanaBulanIni}</p>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* MASTER PUNDI TAB */}
             {activeSubTab === 'master' && (
                 <div className="space-y-4 animate-in">
@@ -1646,7 +1868,6 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                         </div>
                     </div>
 
-                    {/* Pop-up Tambah Kotak dilengkapi panel GPS di bagian atas */}
                     <ModuleView 
                         title="Data Kotak Pundi" 
                         data={filteredMasterPundis} 
@@ -2108,7 +2329,9 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
                 </div>
             )}
 
-            {/* RIWAYAT PUNDI TAB */}
+            {/* ========================================================================= */}
+            {/* SUB TAB: RIWAYAT SEDEKAH PUNDI (SUDAH DIPERBAIKI DENGAN AMAN)            */}
+            {/* ========================================================================= */}
             {activeSubTab === 'riwayat' && (
                 <div className="animate-in space-y-4">
                     <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
