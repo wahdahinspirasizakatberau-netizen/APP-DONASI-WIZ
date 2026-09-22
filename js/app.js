@@ -132,10 +132,28 @@ const App = () => {
         setUser(null);
     };
 
-    const syncDataToSheet = async (sheetName, newData) => {
-        safeSetJSON('wiz_cache_' + sheetName, newData);
+    const syncDataToSheet = async (sheetName, newData, itemsToAdd = null) => {
+        // Perlindungan Ekstra: Gabungkan dengan cache agar data RiwayatPundi lama tidak hilang saat cetak
+        let finalDataToSave = newData;
+        if (sheetName === 'RiwayatPundi' && Array.isArray(newData)) {
+            const cached = safeGetJSON('wiz_cache_RiwayatPundi', []);
+            if (Array.isArray(cached) && cached.length > newData.length) {
+                const map = new Map();
+                cached.forEach(item => { if (item && item.id) map.set(String(item.id), item); });
+                newData.forEach(item => { if (item && item.id) map.set(String(item.id), item); });
+                finalDataToSave = Array.from(map.values());
+            }
+        }
+
+        safeSetJSON('wiz_cache_' + sheetName, finalDataToSave);
         try {
-            await fetch(typeof API_URL !== 'undefined' ? API_URL : '', { method: 'POST', body: JSON.stringify({ action: 'syncData', sheetName, data: newData }) });
+            const url = typeof API_URL !== 'undefined' ? API_URL : '';
+            if (url) {
+                const payload = (itemsToAdd && Array.isArray(itemsToAdd) && itemsToAdd.length > 0)
+                    ? { action: 'appendData', sheetName, data: itemsToAdd, fullData: finalDataToSave }
+                    : { action: 'syncData', sheetName, data: finalDataToSave };
+                await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
+            }
         } catch(err) { setIsOfflineMode(true); }
     };
 
@@ -438,29 +456,41 @@ const App = () => {
 
     return (
         <div className="flex h-screen bg-wiz-light dark:bg-gray-900 overflow-hidden transition-colors duration-200">
-            {isMobileMenuOpen && <div className="fixed inset-0 bg-gray-900/40 dark:bg-black/60 backdrop-blur-sm z-40 lg:hidden" onClick={() => setIsMobileMenuOpen(false)} />}
+            {isMobileMenuOpen && (
+                <div 
+                    className="fixed inset-0 bg-gray-900/60 dark:bg-black/75 backdrop-blur-sm z-[55] lg:hidden" 
+                    onClick={() => setIsMobileMenuOpen(false)} 
+                />
+            )}
             
-            {/* SIDEBAR DESKTOP */}
-            <aside className={`fixed lg:static inset-y-0 left-0 z-50 w-72 bg-white dark:bg-gray-800 border-r border-gray-100 dark:border-gray-700 shadow-[4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300 ease-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} flex flex-col`}>
-                <div className="px-6 py-8 flex items-center justify-center">
+            {/* SIDEBAR DESKTOP & MOBILE DRAWER: Diberi z-[60] dan pb-safe pb-8 agar tombol Akhiri Sesi tidak tertutup */}
+            <aside className={`fixed lg:static inset-y-0 left-0 z-[60] lg:z-40 w-72 bg-white dark:bg-gray-800 border-r border-gray-100 dark:border-gray-700 shadow-[4px_0_24px_rgba(0,0,0,0.06)] transition-transform duration-300 ease-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} flex flex-col`}>
+                <div className="px-6 py-7 flex items-center justify-between border-b border-gray-100 dark:border-gray-700">
                     <img 
                         src="https://drive.google.com/uc?id=1TcpcZtGKBKAOBAthf6Rea4HHDZ0l9tBU" 
                         alt="Logo WIZ" 
-                        className="h-10 object-contain"
+                        className="h-9 object-contain"
                         onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }}
                     />
-                    <div style={{display: 'none'}} className="text-3xl font-black text-wiz-green dark:text-emerald-400 tracking-tighter">WIZ<span className="text-wiz-orange">BERAU</span></div>
+                    <div style={{display: 'none'}} className="text-2xl font-black text-wiz-green dark:text-emerald-400 tracking-tighter">WIZ<span className="text-wiz-orange">BERAU</span></div>
+                    
+                    <button 
+                        className="lg:hidden w-8 h-8 flex items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-500 hover:text-red-500" 
+                        onClick={() => setIsMobileMenuOpen(false)}
+                    >
+                        <i className="fa-solid fa-xmark text-lg"></i>
+                    </button>
                 </div>
                 
-                <nav className="flex-1 px-4 py-4 space-y-1.5 overflow-y-auto">
-                    <p className="px-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3 mt-2">Menu Navigasi</p>
+                <nav className="flex-1 px-4 py-4 space-y-1.5 overflow-y-auto custom-scrollbar">
+                    <p className="px-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3 mt-1">Menu Navigasi</p>
                     {navItems.map(item => {
                         const isActive = activeTab === item.id;
                         return (
                             <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }}
-                                className={`w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl transition-all duration-300 text-[14px] font-semibold
-                                ${isActive ? 'bg-gradient-to-r from-wiz-green to-[#2e8870] text-white shadow-lg shadow-wiz-green/30 translate-x-1' 
-                                : 'text-gray-500 dark:text-gray-400 hover:bg-wiz-green/5 dark:hover:bg-gray-700/60 hover:text-wiz-green dark:hover:text-emerald-400'}`}>
+                                className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl transition-all duration-200 text-[14px] font-semibold
+                                ${isActive ? 'bg-gradient-to-r from-wiz-green to-[#2e8870] text-white shadow-md shadow-wiz-green/20 translate-x-1 font-bold' 
+                                : 'text-gray-600 dark:text-gray-300 hover:bg-wiz-green/5 dark:hover:bg-gray-700/60 hover:text-wiz-green dark:hover:text-emerald-400'}`}>
                                 <i className={`${item.icon} w-5 text-center ${isActive ? 'text-white' : 'text-gray-400 dark:text-gray-500'}`}></i> 
                                 {item.label}
                             </button>
@@ -468,13 +498,17 @@ const App = () => {
                     })}
                 </nav>
 
-                <div className="p-5 border-t border-gray-50 dark:border-gray-700">
+                {/* AREA AKHIRI SESI: Diberi padding-bottom safe area yang leluasa sehingga tidak terhalang batas layar */}
+                <div className="p-4 sm:p-5 border-t border-gray-100 dark:border-gray-700 bg-white/50 dark:bg-gray-800/50 pb-8 sm:pb-5">
                     {isOfflineMode && (
-                        <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs px-4 py-3 rounded-xl flex items-center gap-2 font-semibold mb-3 border border-red-100 dark:border-red-800/50">
-                            <i className="fa-solid fa-wifi"></i> Luring / Disconnect
+                        <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-2 font-semibold mb-2.5 border border-red-100 dark:border-red-800/50">
+                            <i className="fa-solid fa-wifi"></i> Mode Luring
                         </div>
                     )}
-                    <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-colors text-sm font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 border border-transparent hover:border-red-100 dark:hover:border-red-900/50">
+                    <button 
+                        onClick={handleLogout} 
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-all text-sm font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 border border-red-200/60 dark:border-red-900/40 active:scale-95 shadow-sm"
+                    >
                         <i className="fa-solid fa-arrow-right-from-bracket"></i> Akhiri Sesi
                     </button>
                 </div>
@@ -745,7 +779,6 @@ const App = () => {
                     </div>
                 </div>
 
-                {/* BOTTOM NAVBAR MOBILE */}
                 <div className="fixed bottom-0 left-0 right-0 lg:left-72 z-50 bg-white/95 dark:bg-gray-800/95 backdrop-blur-lg border-t border-gray-200/80 dark:border-gray-700/80 px-2 py-1.5 pb-safe shadow-[0_-4px_25px_rgba(0,0,0,0.1)] flex items-center justify-around transition-all">
                     {[
                         { id: 'dashboard', label: 'Beranda', icon: 'fa-solid fa-border-all' },
@@ -793,7 +826,6 @@ const App = () => {
                 </div>
             </main>
 
-            {/* MODAL PASSWORD */}
             {typeof window.Modal !== 'undefined' && <window.Modal isOpen={isPasswordModalOpen} onClose={() => setIsPasswordModalOpen(false)} title="Pengaturan Keamanan">
                 <form onSubmit={handleChangePassword} className="space-y-4">
                     {pwdError && <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 p-3 rounded-xl border border-red-100 dark:border-red-800 font-medium flex items-center gap-2"><i className="fa-solid fa-triangle-exclamation"></i> {pwdError}</p>}
@@ -812,7 +844,6 @@ const App = () => {
                 </form>
             </window.Modal>}
 
-            {/* MODAL HAPUS DATA */}
             {typeof window.Modal !== 'undefined' && <window.Modal isOpen={!!deletePrompt} onClose={() => setDeletePrompt(null)}>
                 <div className="p-4 flex flex-col items-center justify-center text-center">
                     <div className="bg-red-50 dark:bg-red-950/50 p-5 rounded-full text-red-500 mb-5 relative">
@@ -837,7 +868,6 @@ const App = () => {
                 </div>
             </window.Modal>}
 
-            {/* POP UP DRIVE PREVIEW */}
             {viewImage && (
                 <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-gray-900/90 dark:bg-black/95 backdrop-blur-md animate-in" onClick={() => setViewImage(null)}>
                     <div className="relative max-w-4xl w-full h-[85vh] flex justify-center items-center slide-up">
