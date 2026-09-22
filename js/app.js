@@ -40,7 +40,11 @@ const App = () => {
     const [deletePrompt, setDeletePrompt] = useState(null);
     const [viewImage, setViewImage] = useState(null);
 
-    const [amils, setAmils] = useState(() => safeGetJSON('wiz_cache_Amil', typeof fallbackAmils !== 'undefined' ? fallbackAmils : []));
+    const [amils, setAmils] = useState(() => {
+        const cached = safeGetJSON('wiz_cache_Amil', null);
+        if (Array.isArray(cached) && cached.length > 0) return cached;
+        return typeof fallbackAmils !== 'undefined' ? fallbackAmils : [];
+    });
     const [contacts, setContacts] = useState(() => safeGetJSON('wiz_cache_Kontak', []));
     const [programs, setPrograms] = useState(() => safeGetJSON('wiz_cache_Program', []));
     const [donations, setDonations] = useState(() => safeGetJSON('wiz_cache_Donasi', []));
@@ -103,26 +107,60 @@ const App = () => {
 
     useEffect(() => { fetchAllData(); }, []);
 
-    const handleLogin = (email, password, setError) => {
+    const handleLogin = async (email, password, setError) => {
         const cleanEmail = String(email || '').trim().toLowerCase();
         const cleanPassword = String(password || '').trim();
 
-        const foundUser = amils.find(a => {
-            const amilEmail = String(a.email || '').trim().toLowerCase();
-            const amilPass = String(a.password || '').trim();
-            return amilEmail === cleanEmail && amilPass === cleanPassword;
-        });
+        // 1. Ambil amil dari memori state, cache, atau fallback
+        let listAmils = Array.isArray(amils) && amils.length > 0 ? amils : [];
+        if (listAmils.length === 0) {
+            const cached = safeGetJSON('wiz_cache_Amil', null);
+            if (Array.isArray(cached) && cached.length > 0) listAmils = cached;
+            else if (typeof fallbackAmils !== 'undefined' && Array.isArray(fallbackAmils)) listAmils = fallbackAmils;
+        }
+
+        const matchAmil = (list) => {
+            return list.find(a => {
+                const amilEmail = String(a.email || a.Email || '').trim().toLowerCase();
+                const amilPass = String(a.password !== undefined ? a.password : (a.Password !== undefined ? a.Password : (a.sandi || a.Sandi || ''))).trim();
+                return amilEmail === cleanEmail && amilPass === cleanPassword;
+            });
+        };
+
+        let foundUser = matchAmil(listAmils);
+
+        // 2. Jika belum ditemukan di memori/cache, cek langsung secara live ke server Google Sheets
+        if (!foundUser && typeof API_URL !== 'undefined' && API_URL) {
+            try {
+                if (typeof setError === 'function') setError('Memverifikasi kredensial ke server...');
+                const res = await fetch(API_URL);
+                const result = await res.json();
+                if (result.status === 'success' && result.data && Array.isArray(result.data.Amil) && result.data.Amil.length > 0) {
+                    setAmils(result.data.Amil);
+                    safeSetJSON('wiz_cache_Amil', result.data.Amil);
+                    foundUser = matchAmil(result.data.Amil);
+                }
+            } catch (err) {
+                console.warn("Gagal verifikasi live ke server:", err);
+            }
+        }
+
+        // 3. Cek kembali ke fallbackAmils jika offline
+        if (!foundUser && typeof fallbackAmils !== 'undefined' && Array.isArray(fallbackAmils)) {
+            foundUser = matchAmil(fallbackAmils);
+        }
 
         if (foundUser) {
-            if (String(foundUser.status || '').trim().toLowerCase() !== 'aktif') {
+            const status = String(foundUser.status || foundUser.Status || 'Aktif').trim().toLowerCase();
+            if (status !== 'aktif') {
                 return setError('Akses ditolak: Akun non-aktif atau diblokir.');
             }
             safeSetJSON('wiz_user_session', foundUser);
             safeSetJSON('wiz_user_email', cleanEmail);
             setUser(foundUser);
-            setError('');
+            if (typeof setError === 'function') setError('');
         } else {
-            setError('Kredensial tidak valid. Pastikan email dan sandi benar.');
+            if (typeof setError === 'function') setError('Kredensial tidak valid. Pastikan email dan sandi benar.');
         }
     };
 
