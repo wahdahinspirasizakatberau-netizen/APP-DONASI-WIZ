@@ -637,31 +637,92 @@ const PundiView = ({ pundis = [], setPundis, riwayatPundis = [], setRiwayatPundi
         }
     };
 
+    // FUNGSI PERBAIKAN: Hanya menambahkan data penjemputan baru, TANPA menghapus data lama
     const markAsDijemput = (pundisToUpdate) => {
         const todayStr = new Date().toISOString().split('T')[0];
-        let newRiwayat = [...(riwayatPundis || [])];
-        let isChanged = false;
+        
+        // 1. Ambil seluruh riwayat yang ada saat ini (gabungkan memori & cache lokal agar tidak ada riwayat lama yang hilang)
+        let cachedRiwayat = [];
+        try {
+            const raw = localStorage.getItem('wiz_cache_RiwayatPundi');
+            if (raw) cachedRiwayat = JSON.parse(raw);
+        } catch(e) {}
 
-        pundisToUpdate.forEach(p => {
-            const existingIdx = newRiwayat.findIndex(r => String(r.pundiId) === String(p.id) && new Date(r.date).getMonth() === currentMonth && new Date(r.date).getFullYear() === currentYear);
+        const baseRiwayatMap = new Map();
+        // Masukkan data dari cache
+        (Array.isArray(cachedRiwayat) ? cachedRiwayat : []).forEach(r => {
+            if (r && r.id) baseRiwayatMap.set(String(r.id), r);
+        });
+        // Masukkan data dari state riwayatPundis
+        (Array.isArray(riwayatPundis) ? riwayatPundis : []).forEach(r => {
+            if (r && r.id) baseRiwayatMap.set(String(r.id), r);
+        });
+
+        let allRiwayatList = Array.from(baseRiwayatMap.values());
+        let newItemsAdded = [];
+        let hasChanges = false;
+
+        pundisToUpdate.forEach((p, idx) => {
+            // Periksa apakah pundi ini sudah tercatat penarikan/penjemputannya di bulan & tahun ini
+            const existingIdx = allRiwayatList.findIndex(r => {
+                const matchPundi = (r.pundiId && String(r.pundiId) === String(p.id)) || 
+                                   (r.noUrut && String(r.noUrut) === String(p.noUrut));
+                if (!matchPundi) return false;
+
+                if (!r.date) return false;
+                const d = new Date(r.date);
+                if (isNaN(d.getTime())) return false;
+                return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+            });
+
             if (existingIdx >= 0) {
-                if (newRiwayat[existingIdx].status === 'Belum' || !newRiwayat[existingIdx].status) {
-                    newRiwayat[existingIdx] = { ...newRiwayat[existingIdx], status: 'Dijemput' };
-                    isChanged = true;
+                // JIKA SUDAH ADA:
+                // Hanya ubah jika statusnya masih kosong atau 'Belum'.
+                // JIKA STATUSNYA SUDAH 'Berhasil' ATAU 'Dijemput', JANGAN DIUBAH/JANGAN DIHAPUS!
+                const existing = allRiwayatList[existingIdx];
+                if (existing.status === 'Belum' || !existing.status) {
+                    allRiwayatList[existingIdx] = {
+                        ...existing,
+                        status: 'Dijemput',
+                        tipePundi: p.tipePundi || existing.tipePundi || 'Pundi Umum',
+                        amilName: existing.amilName || user?.name || 'Amil'
+                    };
+                    hasChanges = true;
                 }
             } else {
-                newRiwayat.push({
-                    id: Date.now() + Math.floor(Math.random() * 10000) + Number(p.noUrut || 0),
-                    date: todayStr, pundiId: p.id, noUrut: p.noUrut, donorName: p.donorName, usaha: p.usaha,
-                    amount: 0, status: 'Dijemput', amilName: user?.name || 'Amil', notes: 'Otomatis dicetak', receiptUrl: ''
-                });
-                isChanged = true;
+                // JIKA BELUM ADA SAMA SEKALI:
+                // CUKUP TAMBAHKAN BARIS DATA BARU (APPEND)
+                const newRow = {
+                    id: Date.now() + idx + Math.floor(Math.random() * 10000),
+                    date: todayStr,
+                    pundiId: p.id,
+                    noUrut: p.noUrut,
+                    donorName: p.donorName,
+                    usaha: p.usaha,
+                    tipePundi: p.tipePundi || 'Pundi Umum',
+                    amount: 0,
+                    status: 'Dijemput',
+                    amilName: user?.name || 'Amil',
+                    notes: 'Otomatis dicetak',
+                    receiptUrl: ''
+                };
+                allRiwayatList.push(newRow);
+                newItemsAdded.push(newRow);
+                hasChanges = true;
             }
         });
 
-        if (isChanged) {
-            setRiwayatPundis(newRiwayat);
-            if (typeof syncDataToSheet === 'function') syncDataToSheet('RiwayatPundi', newRiwayat);
+        // 2. Simpan hanya jika ada data baru/perubahan
+        if (hasChanges) {
+            setRiwayatPundis(allRiwayatList);
+            try {
+                localStorage.setItem('wiz_cache_RiwayatPundi', JSON.stringify(allRiwayatList));
+            } catch(e) {}
+
+            // Kirim ke sheet dengan menyertakan seluruh data riwayat utuh + data yang baru ditambahkan
+            if (typeof syncDataToSheet === 'function') {
+                syncDataToSheet('RiwayatPundi', allRiwayatList, newItemsAdded);
+            }
         }
     };
 
